@@ -2,11 +2,11 @@
 Description=每 10 分钟自检一次 Fibocom L850 连接
 
 [Timer]
-OnBootSec=10min
-OnUnitActiveSec=10min
+# 开机 3 分钟先看一次（万一 ensure 那几轮都没成），之后每 5 分钟兜底
+OnBootSec=3min
+OnUnitActiveSec=5min
 AccuracySec=30s
 Unit=fibocom-l850-selfheal.service
 
 [Install]
 WantedBy=timers.target
-
