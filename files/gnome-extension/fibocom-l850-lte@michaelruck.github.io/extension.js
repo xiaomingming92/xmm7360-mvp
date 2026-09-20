@@ -261,11 +261,11 @@ class LteToggle extends QuickMenuToggle {
         if (connected) {
             const bars = Math.max(0, Math.min(4, d.bars ?? 0));
             this.set({iconName: ICON_BY_BARS[bars]});
-            const parts = [];
-            if (d.operator) parts.push(d.operator);
-            if (d.rat) parts.push(d.rat);
-            if (typeof d.rsrp_dbm === 'number') parts.push(`${d.rsrp_dbm} dBm`);
-            this._setSubtitle(parts.join(' · ') || T.disconnected);
+            // 副标题学 GNOME 的 Wi-Fi 磁贴：只放"网络名"（信号强弱由图标表达），
+            // RSRP/制式/频段/EARFCN 这些数值都放在菜单的详情行里。
+            const opName = d.operator
+                || (d.mcc ? `${d.mcc}/${String(d.mnc ?? '').padStart(2, '0')}` : null);
+            this._setSubtitle(opName ?? T.disconnected);
         } else if (d.state === 'off') {
             this.set({iconName: ICON_OFF});
             this._setSubtitle(T.off);
