@@ -139,11 +139,15 @@ sudo /home/xmm/ai/xmm7360-driver/install-gnome-layer.sh
 ## 已知限制（来自驱动本身）
 
 - **没有电源管理**：挂起后模组掉线，必须重新配置 —— 这就是 `xmm7360-resume.service` 的作用；
-- **重刷模组固件后必须做两件事**（2026-09-20 实测，刷国际版后卡了两小时就是这两条）：
-  1. **FCC 锁的 key 会被重置为全零**：上游 `rpc.py` 硬编码 `[0x3d,0xf8,0xc7,0x19]`
-     解不开工厂重置过的模组（上游 issue #240），FCC 未解锁时模组**不应答任何 RPC**，
-     表现是"卡在 `UtaMsSmsInit` / 一直不注册"。产物里的 `src/rpc/rpc.py::do_fcc_unlock()`
-     已改为依次尝试两个 key，`open_xdatachannel.py` 也把 FCC 解锁提到初始化最前面；
+- **FCC 锁每次开机都会重新锁上，且必须先解锁才能初始化**（2026-09-20 实测定位）：
+  上游 `open_xdatachannel.py` 把 `do_fcc_unlock()` 放在 `UtaMsSmsInit…SimOpenReq` **之后**，
+  而模组处于 FCC 锁定状态时**不应答这些初始化命令** → 表现就是"卡在 `UtaMsSmsInit`、
+  一直不注册、开机后要等很久（其实是等下一次重试）"。
+  产物里的 `open_xdatachannel.py` 已把 FCC 解锁**提到初始化序列最前面**（这才是真正的解）；
+  另外 `rpc.py::do_fcc_unlock()` 也改为依次尝试两个 key（上游 issue #240 提到工厂重置的
+  模组要用全零 hash；本机实测硬编码 `3df8c719` 仍然有效，全零作为兜底）。
+  日志判断：`FCC lock: state 0 mode 2` = 锁着（需要解锁）；`state 1` = 已解锁。
+- **重刷模组固件后要补一件事**（2026-09-20 实测，刷国际版后卡了两小时的第二条原因）：
   2. **网络模式偏好会被重置成 `AT+WS46=28`（只有 2G+3G）**：国内 2G/3G 多地已关，
      于是"有 SIM、`AT+CSQ: 99,99` 无信号、`AT+COPS: 2` 搜索中、注册不上"。
      用 `sudo /usr/local/bin/fibocom-l850-rat auto`（或面板 菜单→网络模式→自动）改回
