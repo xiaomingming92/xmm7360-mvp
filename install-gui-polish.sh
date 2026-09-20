@@ -5,6 +5,10 @@
 #      Connect→连接、Disconnect→断开连接、Turn Off→关闭、Settings→设置、APN→APN
 #   2) operators.csv 补 46001 → 中国联通（磁贴副标题显示运营商名，像 GNOME 那样）
 #   3) ctl 判据改为"必须有 IPv4"，"on" 交给 ensure 服务后台重试（#186 策略）
+#   4) 扩展里「重新连接」= 菜单头（移动网络 那一行）右侧的圆钮，不再是菜单里独立一行：
+#      落点用 QuickToggleMenu.addHeaderSuffix()，和 GNOME 自带 Wi-Fi 菜单右侧的扫描菊花同一个位置
+#      （gnome-shell/js/ui/status/network.js）。老 Shell 没有该 API 时自动退回菜单行。
+#      注意：Wayland 下改扩展必须「注销重登」，disable/enable 不会重载 JS。
 # 用法：sudo ./install-gui-polish.sh
 set -euo pipefail
 

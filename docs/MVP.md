@@ -63,7 +63,7 @@
 | 探针更灵敏 | `sudo systemctl edit fibocom-l850-watch.service` → `Environment=PROBE_INTERVAL=60` |
 | 事件更"广" | 改 `fibocom-l850-watch` 里的 grep 正则 |
 | 看恢复过程 | `journalctl -t fibocom-l850-watch -f` / `journalctl -t fibocom-l850-retry -f` |
-| 手动来一轮 | `sudo /usr/local/bin/fibocom-l850-ctl on`（或面板开关 / 菜单「重新连接」） |
+| 手动来一轮 | `sudo /usr/local/bin/fibocom-l850-ctl on`（或面板开关 / 菜单头右侧的圆钮「重新连接」） |
 | 只想要轮询 | `sudo systemctl disable --now fibocom-l850-watch.service`（其余链路不受影响） |
 
 ## 六、历史对照：谁负责哪一层的坑
@@ -74,3 +74,17 @@
 - **xmm7360-pci（社区）**：坑在"能改但没人改的地方" —— FCC 解锁顺序、
   TX 丢帧雪崩、无电源管理、绕开 MM/NM 所以 GUI 要自己做。
 - 结论：**能打补丁的那条路，才配得上 MVP。**
+
+## 七、GNOME 面板集成易错点（都是当天实际踩过的）
+
+| 坑 | 现象 | 正解 |
+|---|---|---|
+| 判据只看 IPv4 | 会话进程已退出、地址还在 → 面板"假在线"、点重连"没反应" | 判据 = 链路 up **+ 有 IPv4 + ping 通**（`fibocom-l850-ctl` / `-up-retry` / `-status` 同一套） |
+| 判据不看 IPv4 | 驱动有地址、curl 返回 000 | `Status` 的 `connected` 必须要求 `wwan0` 上有 IPv4 |
+| 限高设错对象 | 菜单超出屏幕、滚不动 | `max-height` 必须设在 `menu.actor`（GNOME 的 `PopupSubMenu._needsScrollbar()` 读的就是它）；设在内容 box 或顶层 `menu` 上都不生效 |
+| 顶层菜单没有滚动容器 | 只有子菜单能滚 | 详情行放进 `PopupSubMenuMenuItem`；GNOME 只有 `PopupSubMenu` 自带 `St.ScrollView` |
+| 想在菜单头那一行放按钮 | 只能加一整行菜单项 | 落点是 `QuickToggleMenu` 的 `_header` 网格；按钮 `style_class: 'icon-button flat'` + `St.Icon`，图标 `view-refresh-symbolic` |
+| `addHeaderSuffix()` 放不到行尾 | 公开 API 把 actor 插在「标题」和 `_headerSpacer` 之间，而 x_expand 的是 spacer → 按钮紧贴标题文字（GNOME 的 Wi-Fi 扫描菊花就是这个位置） | 要行尾就复用同一套内部网格、换个顺序：`标题 \| _headerSpacer（伸缩） \| 按钮`（`_header` / `_headerTitle` / `_headerSpacer` 在 GNOME 46–50 未改名）；拿不到内部字段时退回 `addHeaderSuffix()`，再不行退回菜单行 |
+| `addHeaderSuffix` 只能调一次 | 二次调用会先 `remove_child(_headerSpacer)`，spacer 已不在 → 报错 | 表头后缀只挂一个 actor |
+| Wayland 下改完没变化 | 注销重登前后一样 | gnome-shell 的 ESM 模块缓存只在新会话建立；改 `extension.js` 必须**注销重登**（disable/enable 不够） |
+| 装了两份容易改错 | 改了 repo 里的文件但面板没变 | 源在 `files/gnome-extension/<uuid>/extension.js`，活文件在 `~/.local/share/gnome-shell/extensions/<uuid>/`；用 `install-gui-polish.sh` 同步，别手改活文件 |

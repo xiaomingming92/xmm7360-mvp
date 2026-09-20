@@ -3,7 +3,10 @@
 // 本地改动（相对上游 v2，2026-09-20，作者 xmm + Codex）：
 //   把纯 QuickToggle 换成 QuickMenuToggle，让磁贴和 GNOME 自带的
 //   蓝牙 / 性能模式 / 网络共享 一样是 "图标 + 标题 + 副标题 + > 箭头" 的菜单磁贴；
-//   菜单里提供：刷新状态 / 当前 APN / 扩展设置。
+//   菜单里提供：详情（信号/运营商/网络/APN）/ 网络模式 / 设置；
+//   「重新连接」不是菜单里的一行，而是菜单头（移动网络 那一行）行尾的圆钮
+//   —— 复用 GNOME 表头网格（QuickToggleMenu._header），落点和 GNOME 自带
+//   Wi-Fi 菜单头的扫描菊花同一套，但贴在行尾。
 //   其余逻辑（D-Bus 调用、轮询、图标映射）与上游一致。
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -11,6 +14,8 @@
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import Clutter from 'gi://Clutter';
+import St from 'gi://St';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {QuickMenuToggle, SystemIndicator} from 'resource:///org/gnome/shell/ui/quickSettings.js';
@@ -128,6 +133,26 @@ class LteToggle extends QuickMenuToggle {
         // 菜单：和 GNOME 自带磁贴一样，右侧 > 打开菜单
         this.menu.setHeader('network-cellular-symbolic', T.title);
 
+        // 「重新连接」放菜单头（移动网络 那一行）右侧的圆钮，省掉菜单里的一整行。
+        // 图标/样式跟 GNOME 自己的 icon-button 一致，点击语义 = 真重连（见 _reconnect()）。
+        this._reconnectButton = null;
+        this._refreshItem = null;
+        const reconnectButton = new St.Button({
+            child: new St.Icon({icon_name: 'view-refresh-symbolic'}),
+            style_class: 'icon-button flat',
+            can_focus: true,
+            y_align: Clutter.ActorAlign.CENTER,
+            accessible_name: T.reconnect,
+        });
+        reconnectButton.connect('clicked', () => this._reconnect());
+        if (this._addHeaderTrailing(reconnectButton)) {
+            this._reconnectButton = reconnectButton;
+        } else {
+            // 表头结构拿不到（未来 Shell 改名）：退回菜单行，保证重连入口还在
+            this._refreshItem = new PopupMenu.PopupMenuItem(T.reconnect);
+            this._refreshItem.connect('activate', () => this._reconnect());
+        }
+
         // 详情行（只读）：信号 / 运营商 / 网络（制式·频段·EARFCN）/ APN。
         // 放进 **子菜单**：GNOME 只有 PopupSubMenu 自带 St.ScrollView
         // （popupMenu.js 的注释："we make it scrollable … only take effect if a CSS
@@ -161,14 +186,8 @@ class LteToggle extends QuickMenuToggle {
         this.menu.addMenuItem(this._modeMenu);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        this._refreshItem = new PopupMenu.PopupMenuItem(T.reconnect);
-        this._refreshItem.connect('activate', () => {
-            // 真的去重连：SetEnabled(true) → ctl on → 检查"链路+IPv4+能 ping"，
-            // 任一不满足就交给 ensure 服务在后台重试（#186 策略）。
-            this._setState(true);
-            this.menu.close();
-        });
-        this.menu.addMenuItem(this._refreshItem);
+        if (this._refreshItem)
+            this.menu.addMenuItem(this._refreshItem);
 
         this._prefsItem = new PopupMenu.PopupMenuItem(`${T.settings}…`);
         this._prefsItem.connect('activate', () => {
@@ -260,6 +279,51 @@ class LteToggle extends QuickMenuToggle {
                 try { bus.call_finish(res); } catch (e) { logError(e); }
                 this._sync();
             });
+    }
+
+    // 菜单头右侧圆钮 = 「重新连接」。语义不变（和原来的菜单行完全一样）：
+    // SetEnabled(true) → ctl on → 检查"链路+IPv4+能 ping"，任一不满足就交给
+    // ensure 服务在后台按阶梯重试（#186 策略）。所以按一下不会"点了没反应"。
+    _reconnect() {
+        this._setState(true);
+        if (this.menu.isOpen)
+            this.menu.close();
+    }
+
+    // 把 actor 挂到菜单头（"移动网络"那一行）的**行尾**。
+    //
+    // 为什么不用 GNOME 公开的 menu.addHeaderSuffix()：它是把 actor 插在
+    // 「标题」和「_headerSpacer」之间，而真正 x_expand 的是那个 spacer
+    // （gnome-shell/js/ui/quickSettings.js QuickToggleMenu.addHeaderSuffix：
+    //   attach_next_to(actor, this._headerTitle, side); attach_next_to(spacer, actor, side)）
+    // —— 结果是 actor 紧贴标题文字，靠不到行尾（GNOME 的 Wi-Fi 扫描菊花就是这个位置）。
+    // 我们要的是"行尾的圆钮"，所以复用同一套内部网格，只把顺序换成：
+    //   标题 | _headerSpacer（伸缩） | 按钮（贴右边缘）
+    // 内部字段名在 GNOME 46–50 一直是 _header / _headerTitle / _headerSpacer；
+    // 万一将来改名，返回 false，外面上层会退回 addHeaderSuffix()，再不行退回菜单行。
+    _addHeaderTrailing(actor) {
+        const menu = this.menu;
+        const header = menu._header;
+        const layout = header?.layout_manager;
+        const title = menu._headerTitle;
+        const spacer = menu._headerSpacer;
+
+        if (header && layout && title && spacer) {
+            const side = header.text_direction === Clutter.TextDirection.RTL
+                ? Clutter.GridPosition.LEFT
+                : Clutter.GridPosition.RIGHT;
+            if (spacer.get_parent() === header)
+                header.remove_child(spacer);
+            layout.attach_next_to(spacer, title, side, 1, 1);
+            layout.attach_next_to(actor, spacer, side, 1, 1);
+            return true;
+        }
+
+        if (typeof menu.addHeaderSuffix === 'function') {
+            menu.addHeaderSuffix(actor);
+            return true;
+        }
+        return false;
     }
 
     _setMode(mode) {
