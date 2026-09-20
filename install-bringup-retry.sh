@@ -24,6 +24,12 @@ log "4/4 用新包装脚本后台重跑（会静置 30s，最多 3 轮；用 --n
 systemctl reset-failed fibocom-l850-up.service 2>/dev/null || true
 systemctl start --no-block fibocom-l850-up.service
 
+# timer 也同步成"开机 3 分钟后"（初始化太早会把模组 RPC 会话弄成半死状态）
+install -D -m 644 "$ROOT/files/etc/systemd/system/fibocom-l850-up.timer" \
+        /etc/systemd/system/fibocom-l850-up.timer
+systemctl daemon-reload
+systemctl restart fibocom-l850-up.timer 2>/dev/null || true
+
 cat <<'EOF'
 
 完成。观察（正常需要 1~3 分钟，期间它会自己重试）：

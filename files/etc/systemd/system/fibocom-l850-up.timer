@@ -1,12 +1,13 @@
 [Unit]
-Description=开机 15 秒后触发 Fibocom L850 bring-up（脱离启动关键路径）
+Description=开机 3 分钟后触发 Fibocom L850 bring-up（脱离启动关键路径）
 Documentation=https://github.com/michaelruck/fibocom-l850-gnome-lte
 
 [Timer]
-OnBootSec=15s
+# 实测：初始化太早（开机 20~60 秒）模组不回 SmsInit，会把 RPC 会话弄成"半死"状态，
+# 之后所有尝试都卡在第一条命令上；唯一成功的一次是模块加载后约 4 分钟才发起初始化。
+OnBootSec=180s
 AccuracySec=5s
 Unit=fibocom-l850-up.service
 
 [Install]
 WantedBy=timers.target
-

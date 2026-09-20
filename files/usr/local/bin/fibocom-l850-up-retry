@@ -14,7 +14,7 @@ set -u
 log() { logger -t fibocom-l850-retry -- "$*"; echo "$*"; }
 have_ipv4() { ip -4 addr show wwan0 2>/dev/null | grep -q 'inet '; }
 
-SETTLE=${SETTLE:-30}       # 每轮开始前的静置时间
+SETTLE=${SETTLE:-60}       # 每轮开始前的静置时间（首轮=开机后 3 分钟 timer + 60 秒静置 ≈ 4 分钟）
 RUN_TIMEOUT=${RUN_TIMEOUT:-180}
 MAX_TRIES=${MAX_TRIES:-3}
 
@@ -40,4 +40,3 @@ done
 
 log "3 轮都没成功：建议关机（完全断电）再开机，让开机那一次 bring-up 自己跑完"
 exit 1
-
