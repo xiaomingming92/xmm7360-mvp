@@ -154,7 +154,9 @@ class LteToggle extends QuickMenuToggle {
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         this._refreshItem = new PopupMenu.PopupMenuItem(T.reconnect);
         this._refreshItem.connect('activate', () => {
-            this._sync();
+            // 真的去重连：SetEnabled(true) → ctl on → 检查"链路+IPv4+能 ping"，
+            // 任一不满足就交给 ensure 服务在后台重试（#186 策略）。
+            this._setState(true);
             this.menu.close();
         });
         this.menu.addMenuItem(this._refreshItem);

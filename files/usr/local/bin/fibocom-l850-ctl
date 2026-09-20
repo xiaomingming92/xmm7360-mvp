@@ -17,10 +17,22 @@ CONF=/etc/fibocom-l850-lte/modem.conf
 METRIC=1000
 [ -r "$CONF" ] && . "$CONF"
 
-# 可用 = 链路起来了 **且** 有 IPv4（xmm7360 的 wwan0 是无载波检测的点对点设备）
+# 可用 = 链路起来了 **且** 有 IPv4 **且真能通**（ping 一次）
+# 为什么要 ping：会话进程退出后，IP 和路由会残留成"陈旧地址"，
+# 只看 state/inet 会误判为在线，导致"已连接但没网"时自愈不触发。
+PROBE_IP="${PROBE_IP:-}"
+if [ -z "$PROBE_IP" ]; then
+    # 优先用 modem.conf 里的第一个 DNS 做连通性探测，其次阿里 DNS
+    PROBE_IP=$(printf '%s' "${DNS:-}" | tr -d '"' | awk '{print $1}')
+    [ -n "$PROBE_IP" ] || PROBE_IP=223.5.5.5
+fi
+
+# $1=1 时做连通性探测（默认做；设 SKIP_PROBE=1 可跳过）
 link_is_up() {
     ip link show "$IFACE" 2>/dev/null | grep -qE 'state (UP|UNKNOWN)' &&
         ip -4 addr show "$IFACE" 2>/dev/null | grep -q 'inet '
+    [ "${SKIP_PROBE:-0}" = "1" ] && return $?
+    ping -c 1 -W 2 -I "$IFACE" "$PROBE_IP" >/dev/null 2>&1
 }
 
 ensure_route() {
@@ -69,4 +81,3 @@ case "${1:-}" in
     exit 2
     ;;
 esac
-
