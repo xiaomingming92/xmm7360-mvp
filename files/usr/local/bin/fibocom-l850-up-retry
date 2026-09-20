@@ -136,11 +136,47 @@ hard_recover() {
     fi
 }
 
-# 跑一次 bring-up，输出留档（journal 里仍然有，因为 tee 的 stdout 照常进 journal）
+# 跑一次 bring-up，输出留档（journal 里仍然有，因为 tee 的 stdout 照常进 journal）。
+#
+# 加了"卡死看门狗"（2026-09-20 22:55 演练实测）：模组刚被 modprobe 重载后，
+# 常出现 #186 的典型形态 —— 第一条 RPC（CsiFccLockQueryReq）发出去就再也没有回包，
+# bring-up 一直静静地等（进程 S 态、/run/fibocom-l850-up.log 不再增长），
+# 于是白等满 180 秒超时才被 timeout 杀掉，再靠重跑成功（重跑通常几秒就成）。
+# 这里改成：输出连续 STALL 秒没有增长 → 判定 #186 卡死 → 杀掉立刻重跑。
+# 取值依据（2026-09-20 全天实测）：**成功的 bring-up 只要 3~20 秒**就把 IPv4 拿到手
+# （22:51:46→22:51:49 成功；20:28:54→20:28:56 成功；18:07:42→18:07:46 成功），
+# 而卡死的形态是"第一条 RPC 发出去后彻底静默"（22:55:33 起 2 分钟零输出）。
+# 所以 45 秒静默基本可以确诊卡死，不必等满 45/60/120/180 的超时。
+BRINGUP_STALL=${BRINGUP_STALL:-45}
 run_bringup() {
-    local tmo=$1 rc
-    timeout -k 5 "$tmo" /usr/local/bin/fibocom-l850-up 2>&1 | tee "$BUPLOG"
-    rc=${PIPESTATUS[0]}
+    local tmo=$1 rc=0 runner size prev=-1 silent=0
+    : > "$BUPLOG"
+    timeout -k 5 "$tmo" /usr/local/bin/fibocom-l850-up 2>&1 | tee "$BUPLOG" &
+    runner=$!
+    while kill -0 "$runner" 2>/dev/null; do
+        sleep 5
+        size=$(stat -c %s "$BUPLOG" 2>/dev/null || echo 0)
+        if [ "$size" -gt 0 ] && [ "$size" = "$prev" ]; then
+            silent=$(( silent + 5 ))
+            if [ "$silent" -ge "$BRINGUP_STALL" ]; then
+                log "bring-up 输出停滞 ${BRINGUP_STALL}s（疑似 #186：首条 RPC 无应答）→ 杀掉重跑，不等满 ${tmo}s"
+                kill_strays
+                rc=124
+                break
+            fi
+        else
+            silent=0
+        fi
+        prev=$size
+    done
+    # 收尾保险：最多再等 10 秒（判死时 python 已被 kill_strays 干掉，timeout/tee 会自己退），
+    # 避免极端情况卡在这里出不来
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        kill -0 "$runner" 2>/dev/null || break
+        sleep 1
+    done
+    kill "$runner" 2>/dev/null || true
+    wait "$runner" 2>/dev/null || true
     if grep -q "Device or resource busy" "$BUPLOG" 2>/dev/null; then
         log "本次 bring-up 撞到 RPC 被占用（EBUSY）：持有者=$(fuser -v /dev/xmm0/rpc 2>&1 | tail -n +2 | tr '\n' ' ' | sed 's/  */ /g')"
     fi
