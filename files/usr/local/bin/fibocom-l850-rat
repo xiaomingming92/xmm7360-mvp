@@ -52,6 +52,17 @@ echo "设置网络模式 → AT+WS46=$V（$1）"
 send_at "AT+WS46=$V"
 echo "当前值：$(send_at 'AT+WS46?' | tr -d '\r')"
 
-echo "重新建立数据会话…"
-systemctl --no-block restart fibocom-l850-up.service 2>/dev/null || true
-
+# 重新建立数据会话（restart ensure）。
+# 注意：这两个例外是 2026-09-20 22:50 演练踩出来的 —— 从 ensure 内部调用本脚本时，
+# 这里的 restart 会把**正在跑的 ensure 自己** SIGTERM 掉，后面的 modprobe 重载
+# 一步都不会执行（硬恢复被腰斩），于是又退回慢路径。
+#   · NORESTART=1：调用方（fibocom-l850-up-retry 的 hard_recover）自己会接着建会话
+#   · 已有 ensure 在跑：不要重启，让它继续
+if [ "${NORESTART:-0}" = "1" ]; then
+    echo "（NORESTART=1：跳过重启 ensure，由调用方接着建会话）"
+elif pgrep -f 'fibocom-l850-up-retry' >/dev/null 2>&1; then
+    echo "（ensure 正在运行：跳过重启，避免把它自己杀掉）"
+else
+    echo "重新建立数据会话…"
+    systemctl --no-block restart fibocom-l850-up.service 2>/dev/null || true
+fi

@@ -112,17 +112,28 @@ timeout_for_attempt() {
 # 硬恢复：整条阶梯里唯一能清掉驱动错误态的动作
 # （xmm7360_poll() 的 `bad status` → xmm->error = -ENODEV，只有 dev_init 清零）
 hard_recover() {
+    local ready_before ready_after
     log "硬恢复：重载 xmm7360 模块（驱动错误态只有重新 probe 才清）"
     if [ -x /usr/local/bin/fibocom-l850-rat ]; then
         log "顺带纠正网络模式为自动（AT+WS46=31）"
-        /usr/local/bin/fibocom-l850-rat auto >/dev/null 2>&1 || true
+        # NORESTART=1 是必须的：rat 默认会 restart ensure 服务来"重建会话"，
+        # 而我们此刻就在 ensure 里面 —— 那等于把自己 SIGTERM 掉，后面的 modprobe
+        # 一步都不会执行（2026-09-20 22:50 演练实测：硬恢复被腰斩，退回慢路径）。
+        NORESTART=1 /usr/local/bin/fibocom-l850-rat auto >/dev/null 2>&1 || true
         sleep 5
     fi
     kill_strays
+    ready_before=$(journalctl -k -n 40 -o cat 2>/dev/null | grep -c 'modem is ready')
     modprobe -r xmm7360 2>/dev/null || true
     sleep 3
     modprobe xmm7360 2>/dev/null || true
     sleep 10
+    ready_after=$(journalctl -k -n 40 -o cat 2>/dev/null | grep -c 'modem is ready')
+    if [ "$ready_after" -gt "$ready_before" ]; then
+        log "模块已重载（内核确认：modem is ready）"
+    else
+        log "注意：重载后内核没出现 modem is ready（可能没卸干净 / 设备没重新枚举）"
+    fi
 }
 
 # 跑一次 bring-up，输出留档（journal 里仍然有，因为 tee 的 stdout 照常进 journal）
