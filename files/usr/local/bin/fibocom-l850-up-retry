@@ -28,7 +28,9 @@ if ! flock -n 9; then
     exit 0
 fi
 
-RUN_TIMEOUT=${RUN_TIMEOUT:-90}        # 单次 bring-up 超时
+# 单次 bring-up 超时：RPC 初始化修好后（FCC 解锁 + 刷新固件），
+# 剩余瓶颈变成"等待注册/附着"，90 秒经常不够，放宽到 180 秒。
+RUN_TIMEOUT=${RUN_TIMEOUT:-180}
 TRIES_PER_ROUND=${TRIES_PER_ROUND:-4} # 同一模块加载下重试次数（#186 的关键）
 ROUNDS=${ROUNDS:-3}                   # 失败后"重载模块再来一轮"的轮数
 SETTLE=${SETTLE:-15}                  # 首次动作前的静置
