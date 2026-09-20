@@ -20,8 +20,8 @@ have_ipv4() { ip -4 addr show wwan0 2>/dev/null | grep -q 'inet '; }
 kill_strays() { pkill -f 'open_xdatachannel.py' 2>/dev/null || true; sleep 2; }
 
 RUN_TIMEOUT=${RUN_TIMEOUT:-90}        # 单次 bring-up 超时
-TRIES_PER_ROUND=${TRIES_PER_ROUND:-3} # 同一模块加载下重试次数（#186 的关键）
-ROUNDS=${ROUNDS:-2}                   # 失败后"重载模块再来一轮"的轮数
+TRIES_PER_ROUND=${TRIES_PER_ROUND:-4} # 同一模块加载下重试次数（#186 的关键）
+ROUNDS=${ROUNDS:-3}                   # 失败后"重载模块再来一轮"的轮数
 SETTLE=${SETTLE:-15}                  # 首次动作前的静置
 
 if have_ipv4; then

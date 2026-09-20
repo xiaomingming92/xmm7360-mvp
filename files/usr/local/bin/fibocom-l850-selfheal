@@ -1,0 +1,26 @@
+#!/bin/bash
+# 定时自检：链路+IPv4+ping 都正常才算健康；否则（且 ensure 没在跑）重跑 ensure。
+# 由 fibocom-l850-selfheal.timer 每 10 分钟调用一次。
+set -u
+
+IFACE=${IFACE:-wwan0}
+PROBE=${PROBE:-223.5.5.5}
+
+healthy() {
+    ip link show "$IFACE" >/dev/null 2>&1 &&
+        ip -4 addr show "$IFACE" 2>/dev/null | grep -q 'inet ' &&
+        ping -c 1 -W 2 -I "$IFACE" "$PROBE" >/dev/null 2>&1
+}
+
+healthy && exit 0
+
+# ensure 正在跑就别打断它（它在做 #186 式重试，可能要好几分钟）
+state=$(systemctl is-active fibocom-l850-up.service 2>/dev/null || true)
+if [ "$state" = "activating" ]; then
+    logger -t fibocom-l850-selfheal -- "自检失败，但 ensure 正在运行（$state），不打断"
+    exit 0
+fi
+
+logger -t fibocom-l850-selfheal -- "自检失败（无 IPv4 或 ping 不通）→ 重跑 ensure"
+systemctl --no-block restart fibocom-l850-up.service 2>/dev/null || true
+
