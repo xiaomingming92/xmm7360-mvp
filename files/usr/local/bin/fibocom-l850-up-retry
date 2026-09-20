@@ -17,6 +17,26 @@ set -u
 
 log() { logger -t fibocom-l850-retry -- "$*"; echo "$*"; }
 have_ipv4() { ip -4 addr show wwan0 2>/dev/null | grep -q 'inet '; }
+
+# 健康 = 链路 up + 有 IPv4 + ping 得通（目标取 modem.conf 里第一个 DNS，默认 223.5.5.5）。
+# 只判 IPv4 是不行的：数据会话死掉后地址会残留成"陈旧地址"，
+# 那时 ensure 会在快速路径上直接退出，重试按钮也就"点了没反应"（2026-09-20 踩到）。
+PROBE_IP=$(printf '%s' "$(sed -n 's/^DNS=//p' /etc/fibocom-l850-lte/modem.conf 2>/dev/null)" | tr -d '"' | awk '{print $1}')
+[ -n "${PROBE_IP:-}" ] || PROBE_IP=223.5.5.5
+
+ping_ok() { ping -c 1 -W 3 -I wwan0 "$PROBE_IP" >/dev/null 2>&1; }
+healthy() { have_ipv4 && ping_ok; }
+
+# 判定"这一次 bring-up 成功了"：IPv4 有了、并且能 ping 通（新会话通常几秒内可通）
+attempt_succeeded() {
+    have_ipv4 || return 1
+    for _ in 1 2 3; do
+        ping_ok && return 0
+        sleep 5
+    done
+    log "拿到 IPv4 但 ping $PROBE_IP 不通（可能是陈旧地址 / 上行卡死）→ 继续重试"
+    return 1
+}
 kill_strays() { pkill -f 'open_xdatachannel.py' 2>/dev/null || true; sleep 2; }
 
 # 单实例锁：面板开关/自检 timer/装脚本都会 restart 服务，如果因此跑出多个实例，
@@ -48,8 +68,8 @@ timeout_for_attempt() {
     esac
 }
 
-if have_ipv4; then
-  log "wwan0 已有 IPv4，无需动作"
+if healthy; then
+  log "wwan0 已健康（链路 + IPv4 + ping $PROBE_IP 通），无需动作"
   exit 0
 fi
 
@@ -63,8 +83,8 @@ for round in $(seq 1 "$ROUNDS"); do
     kill_strays
     timeout -k 5 "$tmo" /usr/local/bin/fibocom-l850-up
     rc=$?
-    if have_ipv4; then
-      log "成功：wwan0 已有 IPv4（rc=$rc）"
+    if attempt_succeeded; then
+      log "成功：wwan0 已有 IPv4 且 ping $PROBE_IP 通（rc=$rc）"
       exit 0
     fi
     log "本次未拿到 IPv4（rc=$rc），继续重试"

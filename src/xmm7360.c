@@ -968,7 +968,16 @@ static void xmm7360_net_flush(struct xmm_net *xn)
 	return;
 
 drop:
-	dev_err(xn->xmm->dev, "Failed to ship coalesced frame");
+	/* 本地补丁（2026-09-20，针对上游缺陷）：
+	 * 上游在打包失败时只打了这条日志就返回 —— 既不重置 queued_bytes/packets，
+	 * 也不给上层背压。后果：must_flush() 之后永远判定"缓冲已满"，每个新包都进
+	 * flush 分支并再次失败，形成雪崩式丢包（本机实测单次 16547 条），上行卡死，
+	 * 最终整条数据会话失效（wwan0 DOWN、Status: off、IP 变陈旧）。
+	 * 这里：清计数 + 停止发送队列做背压；xmm7360_net_poll() 已有
+	 * netif_wake_queue 逻辑，TX 环空出后会自动唤醒。日志改限速，避免刷爆 journal。 */
+	dev_err_ratelimited(xn->xmm->dev, "Failed to ship coalesced frame");
+	xn->queued_packets = xn->queued_bytes = 0;
+	netif_stop_queue(xn->xmm->netdev);
 }
 
 static enum hrtimer_restart xmm7360_net_deadline_cb(struct hrtimer *t)
