@@ -13,8 +13,10 @@ install -m 755 "$ROOT/files/usr/local/bin/fibocom-l850-selfheal" /usr/local/bin/
 log "2/3 安装 timer/service"
 install -m 644 "$ROOT/files/etc/systemd/system/fibocom-l850-selfheal.service" /etc/systemd/system/
 install -m 644 "$ROOT/files/etc/systemd/system/fibocom-l850-selfheal.timer"   /etc/systemd/system/
+install -m 644 "$ROOT/files/etc/systemd/system/fibocom-l850-up.timer"         /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now fibocom-l850-selfheal.timer >/dev/null
+systemctl restart fibocom-l850-up.timer >/dev/null
 
 log "3/3 状态"
 systemctl list-timers 'fibocom-l850-*' --no-pager | head -5

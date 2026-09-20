@@ -1,11 +1,12 @@
 [Unit]
-Description=开机 3 分钟后触发 Fibocom L850 bring-up（脱离启动关键路径）
+Description=开机 15 秒后触发 Fibocom L850 bring-up（脱离启动关键路径）
 Documentation=https://github.com/michaelruck/fibocom-l850-gnome-lte
 
 [Timer]
-# 实测：初始化太早（开机 20~60 秒）模组不回 SmsInit，会把 RPC 会话弄成"半死"状态，
-# 之后所有尝试都卡在第一条命令上；唯一成功的一次是模块加载后约 4 分钟才发起初始化。
-OnBootSec=180s
+# 2026-09-20 结论修正：早期"初始化太早导致失败"的判断是错的——真凶是刷固件后的
+# FCC hash（全零）与制式（WS46=28）。FCC/制式修好后，开机 15 秒发起即可稳定成功，
+# 桌面（graphical.target ~11s）不受影响，因为这条链路在 timer 里、不在启动关键路径。
+OnBootSec=15s
 AccuracySec=5s
 Unit=fibocom-l850-up.service
 

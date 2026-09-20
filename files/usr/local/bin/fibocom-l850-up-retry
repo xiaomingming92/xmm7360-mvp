@@ -33,7 +33,7 @@ fi
 RUN_TIMEOUT=${RUN_TIMEOUT:-180}
 TRIES_PER_ROUND=${TRIES_PER_ROUND:-4} # 同一模块加载下重试次数（#186 的关键）
 ROUNDS=${ROUNDS:-3}                   # 失败后"重载模块再来一轮"的轮数
-SETTLE=${SETTLE:-15}                  # 首次动作前的静置
+SETTLE=${SETTLE:-5}                   # 首次动作前的静置（timer 已保证不早于开机 15s）
 
 if have_ipv4; then
   log "wwan0 已有 IPv4，无需动作"
