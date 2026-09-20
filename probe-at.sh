@@ -33,11 +33,18 @@ fi
 
 stty -F "$PORT" raw -echo 2>/dev/null
 echo "== 端口 $PORT（每条约 2 秒）"
+
+# 每条命令都用外层 timeout 包住：tty 打开（没置 CLOCAL 时可能阻塞）或读响应卡住
+# 都不会把终端挂死。实测 AT+XACT? 这类不支持的查询会完全没有回复。
 for c in "${CMDS[@]}"; do
     printf '\n### %s\n' "$c"
-    exec 3<>"$PORT"
-    printf '%s\r' "$c" >&3
-    timeout 2 cat <&3
-    exec 3<&-
+    timeout 5 bash -c '
+        port="$1"; cmd="$2"
+        exec 3<>"$port" || exit 1
+        stty -F "$port" raw -echo clocal 2>/dev/null
+        printf "%s\r" "$cmd" >&3
+        timeout 2 cat <&3
+        exec 3<&-
+    ' _ "$PORT" "$c" || echo "(超时/无响应)"
 done
 echo
