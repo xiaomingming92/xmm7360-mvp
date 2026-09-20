@@ -176,12 +176,13 @@ class LteToggle extends QuickMenuToggle {
 
         // 打开菜单时：① 重新读一次 APN（改完 modem.conf 不必重登）
         //            ② 按显示器工作区动态设 max-height，超出部分内部滚动
-        // GNOME 的 popupMenu 已经自带 ScrollView，但它的注释写得很明确：
-        // "the scrollbar will only take effect if a CSS max-height is set on the
-        //  top menu" —— 所以限高必须由弹层自己设，否则长菜单会顶出屏幕。
+        // 注意元素：GNOME 的 PopupSubMenu._needsScrollbar() 读的是
+        //   topMenu.actor.get_theme_node().get_max_height()
+        // 所以 max-height 必须设在弹层 **actor** 上（不是内容 box，否则永不生效）。
         this.menu.connect('open-state-changed', (menu, isOpen) => {
             if (!isOpen) {
                 menu.box.style = null;
+                menu.actor.style = null;
                 return;
             }
             this._apnItem.label.text = `${T.apnPrefix}：${this._readApn()}`;
@@ -192,7 +193,7 @@ class LteToggle extends QuickMenuToggle {
                 const workArea = Main.layoutManager.getWorkAreaForMonitor(monitor.index);
                 // 上下各留 60px（面板高度 + 边距），留出最小值避免极端分辨率下压扁
                 const maxHeight = Math.max(240, workArea.height - 120);
-                menu.box.style = `max-height: ${maxHeight}px;`;
+                menu.actor.style = `max-height: ${maxHeight}px;`;
             } catch (e) {
                 // 拿不到显示器信息就不限高，保持旧行为
                 logError(e);
