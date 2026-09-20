@@ -152,6 +152,12 @@ class LteToggle extends QuickMenuToggle {
 
         this._apnItem.label.text = `${T.apnPrefix}：${this._readApn()}`;
 
+        // 打开菜单时重新读一次 APN（改完 /etc/fibocom-l850-lte/modem.conf 不必重登）
+        this.menu.connect('open-state-changed', (menu, isOpen) => {
+            if (isOpen)
+                this._apnItem.label.text = `${T.apnPrefix}：${this._readApn()}`;
+        });
+
         this._subtitleOk = true;
         this._busy = false;
         this._sync();

@@ -1,0 +1,49 @@
+# PLMN,Operator name — used by fibocom-l850-status to show a friendly network
+# name in the GNOME toggle. PLMN = MCC followed by MNC (2- or 3-digit).
+#
+# 本文件由 xmm7360-driver 产物维护（2026-09-20 起）：
+#   * 中国段取自 GNOME/ModemManager 的 mobile-broadband-provider-info
+#     （China Mobile 46000/46002、China Unicom 46001、China Telecom 46011）
+#     并补上网间常见的 MNC；
+#   * 其余为上游自带的主流运营商条目；
+#   * 小运营商/虚拟运营商（MVNO）如果用的是独立 PLMN，在这里加一行即可，
+#     fibocom-l850-status 每次查询都会重新读本文件，**改完最多 10 秒生效**
+#     （面板轮询周期），不需要重启任何服务。
+#
+# ---- 中国（MCC 460）----
+46000,中国移动
+46002,中国移动
+46004,中国移动
+46007,中国移动
+46008,中国移动
+46001,中国联通
+46006,中国联通
+46009,中国联通
+46003,中国电信
+46005,中国电信
+46011,中国电信
+46012,中国电信
+46015,中国广电
+# ---- 欧洲 ----
+23201,A1 AT
+23203,Magenta AT
+23210,Three AT
+26201,Telekom DE
+26202,Vodafone DE
+26203,O2 DE
+20801,Orange FR
+20810,SFR FR
+20815,Free FR
+20820,Bouygues FR
+22201,TIM IT
+22210,Vodafone IT
+21401,Vodafone ES
+21403,Orange ES
+21407,Movistar ES
+23410,O2 UK
+23415,Vodafone UK
+23420,Three UK
+# ---- 北美 ----
+310260,T-Mobile US
+311480,Verizon US
+

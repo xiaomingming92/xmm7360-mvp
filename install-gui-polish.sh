@@ -24,12 +24,22 @@ cp -a "$DEST/extension.js" "$DEST/extension.js.bak-$(date +%Y%m%d-%H%M%S)"
 install -o "$LOGIN_USER" -g "$(id -gn "$LOGIN_USER")" -m 644 \
     "$ROOT/files/gnome-extension/$UUID/extension.js" "$DEST/extension.js"
 
-log "2/4 补运营商名映射（46001 → 中国联通）"
+log "2/4 合并运营商名映射（中国 460xx 主流运营商 + 上游自带条目，保留你自己的行）"
 CSV=/etc/fibocom-l850-lte/operators.csv
-if [ -f "$CSV" ] && ! grep -q '^46001,' "$CSV"; then
-    printf '46001,中国联通\n' >> "$CSV"
+SRC_CSV="$ROOT/files/etc/fibocom-l850-lte/operators.csv"
+if [ -f "$CSV" ] && [ -f "$SRC_CSV" ]; then
+    added=0
+    while IFS= read -r line; do
+        case "$line" in ''|'#'*) continue ;; esac
+        plmn="${line%%,*}"
+        if ! grep -q "^${plmn}," "$CSV"; then
+            printf '%s\n' "$line" >> "$CSV"
+            added=$((added+1))
+        fi
+    done < "$SRC_CSV"
+    echo "    新增 ${added} 条（已有条目保持不变）"
 fi
-grep -n '^46001,' "$CSV" || true
+grep -n -E '^460[0-9]+,' "$CSV" || true
 
 log "3/4 更新 ctl（判据=有 IPv4；on 交给 ensure 后台重试）"
 install -m 755 "$ROOT/files/usr/local/bin/fibocom-l850-ctl" /usr/local/bin/fibocom-l850-ctl
