@@ -4,10 +4,9 @@ After=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate
 
 [Service]
 Type=oneshot
-# 睡眠 5 秒让设备枚举完，再调上游的 ctl（它自带"模块重载 + 重连"自愈）
-ExecStart=/bin/sh -c 'sleep 5; exec /usr/local/bin/fibocom-l850-ctl on'
-TimeoutStartSec=180
+# 睡眠 5 秒让设备枚举完，再用与开机同一条 ensure 逻辑（带 #186 式重试）
+ExecStart=/bin/sh -c 'sleep 5; exec /usr/local/bin/fibocom-l850-up-retry'
+TimeoutStartSec=900
 
 [Install]
 WantedBy=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
-

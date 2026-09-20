@@ -1,42 +1,59 @@
 #!/bin/bash
-# 带重试的 bring-up 包装脚本（本地补丁，2026-09-20）。
+# bring-up 的 ensure（包装）脚本 —— 本地补丁，2026-09-20 定稿。
 #
-# 为什么需要：上游 open_xdatachannel.py 在模组刚上电、内部初始化还没完成时，
-# 会卡在 "RPC executing UtaMsSmsInit" 之后不动 —— 此时进程常驻并占着
-# /dev/xmm0/rpc，于是：
-#   * 数据会话建立不完全（wwan0 拿不到 IPv4）；
-#   * 面板的状态查询读不到 RPC 设备（Errno 16 busy）→ 信号显示 0。
-# 我们唯一一次成功（09:07）是模块加载后静置约 4 分钟才发起的初始化。
-# 所以这里：先等一段时间 → 跑 bring-up（带超时）→ 用"wwan0 是否有 IPv4"判成功
-# → 失败就清理 + 重载模块再试，最多 3 轮。
+# 依据（本机实测 + 上游 issue #186 "Stuck on UtaMsSmsInit"）：
+#   模组经常对第一条 RPC（UtaMsSmsInit）不回包 → open_xdatachannel.py 一直等，
+#   进程常驻并占着 /dev/xmm0/rpc，于是 wwan0 拿不到 IPv4，面板查询报 busy、信号 0。
+#   上游报告者的规律是：**不要重载模块，把 bring-up 直接重跑 2~3 次**就能过。
+#   2026-09-20 11:0x 本机实测：连续重跑后成功（wwan0 拿到 10.100.37.123/32、
+#   Status 有 rsrp/bars、curl --interface wwan0 → 200），成功后进程自行退出、
+#   RPC 设备释放，面板也就读得到信号了。
+#
+# ensure 策略（按实测证据排序）：
+#   判成功 = wwan0 拿到 IPv4（不看脚本退出码；上游正常路径本来就 exit 1）；
+#   先在同一模块加载下重试 TRIES_PER_ROUND 次；
+#   仍失败才重载 xmm7360 模块，再来 ROUNDS-1 轮。
 set -u
 
 log() { logger -t fibocom-l850-retry -- "$*"; echo "$*"; }
 have_ipv4() { ip -4 addr show wwan0 2>/dev/null | grep -q 'inet '; }
+kill_strays() { pkill -f 'open_xdatachannel.py' 2>/dev/null || true; sleep 2; }
 
-SETTLE=${SETTLE:-60}       # 每轮开始前的静置时间（首轮=开机后 3 分钟 timer + 60 秒静置 ≈ 4 分钟）
-RUN_TIMEOUT=${RUN_TIMEOUT:-180}
-MAX_TRIES=${MAX_TRIES:-3}
+RUN_TIMEOUT=${RUN_TIMEOUT:-90}        # 单次 bring-up 超时
+TRIES_PER_ROUND=${TRIES_PER_ROUND:-3} # 同一模块加载下重试次数（#186 的关键）
+ROUNDS=${ROUNDS:-2}                   # 失败后"重载模块再来一轮"的轮数
+SETTLE=${SETTLE:-15}                  # 首次动作前的静置
 
-for attempt in $(seq 1 "$MAX_TRIES"); do
-  log "第 $attempt/$MAX_TRIES 轮：静置 ${SETTLE}s 后跑 bring-up（超时 ${RUN_TIMEOUT}s）"
-  sleep "$SETTLE"
+if have_ipv4; then
+  log "wwan0 已有 IPv4，无需动作"
+  exit 0
+fi
 
-  timeout -k 5 "$RUN_TIMEOUT" /usr/local/bin/fibocom-l850-up
-  rc=$?
+sleep "$SETTLE"
 
-  if have_ipv4; then
-    log "第 $attempt 轮成功：wwan0 已有 IPv4（bring-up rc=$rc，上游正常路径就是 1）"
-    exit 0
+for round in $(seq 1 "$ROUNDS"); do
+  for attempt in $(seq 1 "$TRIES_PER_ROUND"); do
+    log "第 $round/$ROUNDS 轮 · 第 $attempt/$TRIES_PER_ROUND 次：跑 bring-up（超时 ${RUN_TIMEOUT}s，不重载模块）"
+    kill_strays
+    timeout -k 5 "$RUN_TIMEOUT" /usr/local/bin/fibocom-l850-up
+    rc=$?
+    if have_ipv4; then
+      log "成功：wwan0 已有 IPv4（rc=$rc）"
+      exit 0
+    fi
+    log "本次未拿到 IPv4（rc=$rc），继续重试"
+    sleep 3
+  done
+
+  if [ "$round" -lt "$ROUNDS" ]; then
+    log "本轮 $TRIES_PER_ROUND 次都没成功 → 重载 xmm7360 模块后再来一轮"
+    kill_strays
+    modprobe -r xmm7360 2>/dev/null || true
+    sleep 3
+    modprobe xmm7360 2>/dev/null || true
+    sleep 10
   fi
-
-  log "第 $attempt 轮未拿到 IPv4（rc=$rc）→ 清理残留进程 + 重载 xmm7360 模块"
-  pkill -f 'open_xdatachannel.py' 2>/dev/null || true
-  sleep 2
-  modprobe -r xmm7360 2>/dev/null || true
-  sleep 3
-  modprobe xmm7360 2>/dev/null || true
 done
 
-log "3 轮都没成功：建议关机（完全断电）再开机，让开机那一次 bring-up 自己跑完"
+log "全部尝试失败：可试 ① 拔掉电源适配器后再跑一次（上游 #186 经验）② 关机（完全断电）再开机"
 exit 1
