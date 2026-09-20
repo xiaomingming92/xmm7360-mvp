@@ -55,7 +55,20 @@ install -D -m 644 /home/xmm/ai/xmm7360-driver/files/etc/systemd/system/fibocom-l
         /etc/systemd/system/fibocom-l850-resume.service
 systemctl daemon-reload
 systemctl enable fibocom-l850-resume.service >/dev/null
-systemctl restart fibocom-l850-up.service || log "bring-up 返回非 0（上游脚本正常路径也会 exit 1，用 systemctl status 确认即可）"
+
+# 首次 bring-up：先保证是"干净"的 RPC 会话。
+# xmm7360 的 RPC 初始化每次模块加载只接受一次（上游文档明确写了）：
+# 如果模组此前已经被初始化过（例如反复手工试过），直接再跑会卡在等响应上。
+log "重载 xmm7360 模块，确保 RPC 会话是干净的"
+systemctl stop fibocom-l850-up.service 2>/dev/null || true
+modprobe -r xmm7360 2>/dev/null || true
+sleep 2
+modprobe xmm7360 2>/dev/null || true
+sleep 4
+
+systemctl start fibocom-l850-up.service --no-block 2>/dev/null \
+  || log "bring-up 启动失败，看 journalctl -u fibocom-l850-up -n 30"
+log "bring-up 已在后台跑（Type=oneshot，正常 30–60 秒），不再阻塞终端"
 sudo -u "$LOGIN_USER" \
      DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u "$LOGIN_USER")/bus" \
      gnome-extensions enable "$UUID" 2>/dev/null \
