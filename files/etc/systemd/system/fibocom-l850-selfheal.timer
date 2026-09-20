@@ -2,9 +2,11 @@
 Description=每 10 分钟自检一次 Fibocom L850 连接
 
 [Timer]
-# 开机 3 分钟先看一次（万一 ensure 那几轮都没成），之后每 5 分钟兜底
+# 开机 3 分钟先看一次（万一 ensure 那几轮都没成）。
+# 日常兜底已交给 fibocom-l850-watch（事件优先 + 120s 探针），这里降到 30 分钟，
+# 只作为"守护也没抱怨过"的最后一道保险。
 OnBootSec=3min
-OnUnitActiveSec=5min
+OnUnitActiveSec=30min
 AccuracySec=30s
 Unit=fibocom-l850-selfheal.service
 

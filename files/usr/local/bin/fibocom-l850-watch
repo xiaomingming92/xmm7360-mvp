@@ -1,0 +1,81 @@
+#!/bin/bash
+# fibocom-l850-watch — MVP：事件优先 + 低频探针兜底（本地补丁，2026-09-20）
+#
+# 为什么不是纯轮询：轮询要么费电/费日志，要么慢（今天靠 5 分钟探针发现故障，
+# 恢复要等到下一次探针）。为什么做不到纯事件：驱动不提供"数据会话健康"事件，
+# 而且存在"沉默故障"（链路/IP 都还在，上行已死）——必须有低频探针兜底。
+#
+# 事件源（订阅）：
+#   ① 内核日志：journalctl -k -f，匹配 xmm7360 的驱动级故障
+#      （Failed to ship coalesced frame / error / timeout / PORT open refused …）
+#   ② netlink：ip monitor link route address，wwan0 的链路/地址/路由变化
+#   ③ 面板/自检：走 fibocom-l850-ctl on（仍在，互为兜底）
+# 兜底探针：
+#   ④ 每 PROBE_INTERVAL 秒做一次"链路 + IPv4 + ping"，处理无事件的沉默故障
+#
+# 动作：事件去抖后调用 fibocom-l850-ctl on，由它走完整恢复阶梯：
+#       诊断 → 软恢复（bring-up + #186 重试）→ 硬恢复（重载 xmm7360）→ 复核 ping
+#
+# Part of xmm7360-driver local patches. SPDX-License-Identifier: GPL-3.0-or-later
+set -u
+
+IFACE=${IFACE:-wwan0}
+PROBE_INTERVAL=${PROBE_INTERVAL:-120}   # 探针周期（秒）
+DEBOUNCE=${DEBOUNCE:-5}                 # 事件去抖窗口（秒）
+CTL=/usr/local/bin/fibocom-l850-ctl
+LAST=/run/fibocom-l850-watch.last
+
+log() { logger -t fibocom-l850-watch -- "$*"; }
+
+PROBE_IP=$(printf '%s' "$(sed -n 's/^DNS=//p' /etc/fibocom-l850-lte/modem.conf 2>/dev/null)" \
+           | tr -d '"' | awk '{print $1}')
+[ -n "${PROBE_IP:-}" ] || PROBE_IP=223.5.5.5
+
+healthy() {
+    ip link show "$IFACE" >/dev/null 2>&1 &&
+        ip -4 addr show "$IFACE" 2>/dev/null | grep -q 'inet ' &&
+        ping -c 1 -W 3 -I "$IFACE" "$PROBE_IP" >/dev/null 2>&1
+}
+
+# 去抖 + 触发恢复（事件可能连成一串，5 秒内只动作一次）
+act() {
+    local now last=0
+    now=$(date +%s)
+    [ -r "$LAST" ] && last=$(cat "$LAST" 2>/dev/null || echo 0)
+    if [ $(( now - last )) -lt "$DEBOUNCE" ]; then
+        return 0
+    fi
+    echo "$now" > "$LAST"
+    log "触发恢复：$1"
+    "$CTL" on >/dev/null 2>&1 || log "ctl on 返回非 0（细节见 fibocom-l850-retry 日志）"
+}
+
+# 单实例锁
+exec 9>/run/fibocom-l850-watch.lock
+if ! flock -n 9; then
+    log "已有 watch 在跑，退出"
+    exit 0
+fi
+
+log "启动（探针 ${PROBE_INTERVAL}s / 去抖 ${DEBOUNCE}s / ping 目标 $PROBE_IP）"
+
+# 事件源 ①：内核日志里的 xmm7360 故障
+journalctl -k -f -o cat 2>/dev/null |
+    grep --line-buffered -E "xmm7360.*(Failed to ship|rror|timeout|refused|removed|reset)" |
+    while IFS= read -r line; do
+        act "kernel: ${line:0:120}"
+    done &
+
+# 事件源 ②：netlink 链路/地址/路由变化（只关心我们的接口）
+ip monitor link route address 2>/dev/null |
+    grep --line-buffered "$IFACE" |
+    while IFS= read -r line; do
+        act "netlink: ${line:0:120}"
+    done &
+
+# 兜底：低频探针（沉默故障）
+while :; do
+    sleep "$PROBE_INTERVAL"
+    healthy || act "probe: 链路/IP/ping 不健康"
+done
+
