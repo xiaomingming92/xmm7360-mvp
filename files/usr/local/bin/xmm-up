@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of xmm7360-mvp. SPDX-License-Identifier: GPL-2.0-only
 # 打开 XMM7360 数据通道，并通过 D-Bus 让 NetworkManager 接管这条连接。
 # 用法：sudo xmm-up
 set -uo pipefail

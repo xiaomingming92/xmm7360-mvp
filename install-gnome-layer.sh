@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Part of xmm7360-mvp. SPDX-License-Identifier: GPL-2.0-only
 # 在 xmm7360-pci 驱动之上，安装社区 GUI 层：fibocom-l850-gnome-lte
 #   https://github.com/michaelruck/fibocom-l850-gnome-lte
 #   （systemd 开机服务 + D-Bus 后端 + polkit + GNOME 扩展：快速设置里的 "Mobile Data" 开关）

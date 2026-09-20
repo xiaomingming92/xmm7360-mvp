@@ -178,14 +178,29 @@ sudo ./install-gnome-layer.sh
 - 驱动源码较老（2024-02），上游已停更；本目录内 `src/` 是带本机兼容补丁的可用快照，
   以后内核再变 API 时盯着 `dkms status` / `make` 的编译报错即可。
 
-## 许可证
+## 许可证与来源（尊重原创）
 
-本仓库是多许可的（各部分来自不同上游，按目录区分）：
+本仓库是**多许可**的：**每个文件头部的 SPDX 标识优先**，其余自写部分适用根目录
+[LICENSE](LICENSE)（GPL-2.0 全文）。
 
-| 范围 | 许可 | 说明 |
+| 范围 | 许可 | 来源 |
 |---|---|---|
-| 根目录的安装脚本、自愈脚本（`files/usr/local/bin/fibocom-l850-*`）、文档 | MIT（见 [LICENSE](LICENSE)） | 本机新增的部分 |
-| `src/`（xmm7360-pci 驱动源码 + 本机兼容补丁） | GPL-2.0（沿用上游） | 上游：[xmm7360/xmm7360-pci](https://github.com/xmm7360/xmm7360-pci) |
-| `files/gnome-extension/`（GNOME 面板补丁） | GPL-3.0-or-later（沿用上游） | 上游：[michaelruck/fibocom-l850-gnome-lte](https://github.com/michaelruck/fibocom-l850-gnome-lte) |
+| 自写的安装/自愈脚本（`install*.sh`、`uninstall.sh`、`probe-at.sh`、`fibocom-l850-{up-retry,selfheal}`、`xmm-up`、`xmm-resume`）、`docs/`、README | `GPL-2.0-only` | 本机（xmm + Codex），刻意与驱动同许可 |
+| `src/`（xmm7360-pci 驱动源码 + 本机兼容/TX 补丁） | `GPL-2.0 OR BSD-3-Clause`（双许可，二选一） | 上游 [xmm7360/xmm7360-pci](https://github.com/xmm7360/xmm7360-pci)，作者 **James Wah**（© 2020 genua GmbH / James Wah）。注意：上游没有 LICENSE 文件，`src/xmm7360.c` 头部是唯一许可声明，同目录 `rpc/`、`scripts/` 未写许可头——本仓库按"同项目、同双许可"理解，有异议以上游为准 |
+| `files/usr/local/bin/fibocom-l850-{ctl,daemon,rat,status,watch}`、`files/gnome-extension/`、polkit 策略 | `GPL-3.0-or-later`（沿用上游，**不可改成 GPL-2.0**） | 上游 [michaelruck/fibocom-l850-gnome-lte](https://github.com/michaelruck/fibocom-l850-gnome-lte)，作者 **Michael Ruck**（GPL-3.0） |
 
-分发本仓库（或基于它做衍生）时请按各自目录的许可处理，尤其是 `src/` 里的内核模块。
+两点说明：
+
+- 根许可为什么是 GPL-2.0 而不是 MIT：本仓库主体是内核驱动及其部署脚本，
+  与 `src/` 保持一致，避免"根 MIT + 内部 GPL"这种容易误导人的组合；
+- GPL-2.0 与 GPL-3.0 的部分是**独立程序**（脚本调用命令、不链接进内核模块），
+  同仓库分发不构成许可冲突；改动上游文件时请保留其原有许可头。
+
+### 上游项目与我们的改动
+
+| 上游 | 我们做了什么 |
+|---|---|
+| [xmm7360/xmm7360-pci](https://github.com/xmm7360/xmm7360-pci) | 内核 7.0 两处 API 兼容补丁、TX 丢帧背压补丁、FCC 解锁提到初始化最前（`open_xdatachannel.py`）、rpc FCC key 兜底 |
+| [michaelruck/fibocom-l850-gnome-lte](https://github.com/michaelruck/fibocom-l850-gnome-lte) | GNOME 50 支持、面板文案对齐 GNOME、菜单头「重新连接」圆钮、ensure 重试/分级恢复/卡死看门狗、事件守护 MVP |
+
+<!-- SPDX-License-Identifier: GPL-2.0-only -->

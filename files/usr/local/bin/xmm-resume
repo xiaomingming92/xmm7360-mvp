@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of xmm7360-mvp. SPDX-License-Identifier: GPL-2.0-only
 # 挂起/休眠恢复后重建 4G 数据通道。
 # xmm7360-pci 没有电源管理支持：模组挂起后掉线，必须重新配置。
 set -uo pipefail

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Part of xmm7360-mvp. SPDX-License-Identifier: GPL-2.0-only
 # 卸载 xmm7360-pci，恢复内核 iosm 驱动与之前的自愈脚本。
 set -euo pipefail
 

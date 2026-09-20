@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of xmm7360-mvp. SPDX-License-Identifier: GPL-2.0-only
 # 定时自检：链路+IPv4+ping 都正常才算健康；否则（且 ensure 没在跑）重跑 ensure。
 # 由 fibocom-l850-selfheal.timer 每 10 分钟调用一次。
 set -u

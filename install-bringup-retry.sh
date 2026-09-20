@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Part of xmm7360-mvp. SPDX-License-Identifier: GPL-2.0-only
 # 给 Fibocom bring-up 加"重试 + 静置 + 模块重载"（解决 RPC 卡在 UtaMsSmsInit、
 # 面板 0 信号、wwan0 拿不到 IPv4 的问题）。
 set -euo pipefail

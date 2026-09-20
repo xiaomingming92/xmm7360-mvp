@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of xmm7360-mvp. SPDX-License-Identifier: GPL-2.0-only
 # bring-up 的 ensure（包装）脚本 —— 本地补丁，2026-09-20 定稿。
 #
 # 依据（本机实测 + 上游 issue #186 "Stuck on UtaMsSmsInit"）：

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Part of xmm7360-mvp. SPDX-License-Identifier: GPL-2.0-only
 # 安装 MVP 事件守护：事件优先（内核日志 + netlink）+ 低频探针兜底。
 # 同时把原来的 5 分钟自检降频到 30 分钟（避免和守护重复动作）。
 # 用法：sudo ./install-mvp.sh

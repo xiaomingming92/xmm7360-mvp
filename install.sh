@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Part of xmm7360-mvp. SPDX-License-Identifier: GPL-2.0-only
 # 用社区 xmm7360-pci 驱动替换内核自带的 iosm（ThinkPad A285 / Fibocom L850-GL / Intel XMM7360）
 #
 #   sudo ./install.sh              # 默认 APN=3gnet（联通）

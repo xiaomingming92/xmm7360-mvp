@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Part of xmm7360-mvp. SPDX-License-Identifier: GPL-2.0-only
 # 面板文案对齐 GNOME + 让磁贴的"重新连接"真的能重连。
 #   1) 扩展文案改用 GNOME 自己的术语（zh_CN 译文取自 gnome-shell / gnome-control-center）：
 #      Mobile Network→移动网络、Connected→已连接、Disconnected→已断开、

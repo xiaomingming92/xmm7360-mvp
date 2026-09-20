@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Part of xmm7360-mvp. SPDX-License-Identifier: GPL-2.0-only
 # 让上游的 fibocom-l850-up.service 不再影响启动：
 #   1) 改用 timer（OnBootSec=15s）触发 —— bring-up 完全脱离启动关键路径；
 #   2) 给服务加 TimeoutStartSec=120 —— 万一卡死，systemd 2 分钟后收掉它；

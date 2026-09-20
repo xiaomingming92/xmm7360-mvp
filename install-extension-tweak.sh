@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Part of xmm7360-mvp. SPDX-License-Identifier: GPL-2.0-only
 # 用本目录里的补丁版 extension.js 覆盖 GNOME 扩展（改布局：QuickToggle → QuickMenuToggle）。
 # 会先备份成 extension.js.bak-<时间戳>，随时可回滚。
 # 注意：必须以**普通用户**运行（gnome-extensions 需要会话 D-Bus）。

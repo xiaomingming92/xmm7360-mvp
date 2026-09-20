@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of xmm7360-mvp. SPDX-License-Identifier: GPL-2.0-only
 # 往 XMM7360 的 AT 口发命令并打印回复 —— 用于探测制式/频段相关命令是否支持。
 # 默认只发**查询类**命令（不会改动任何设置）。
 #

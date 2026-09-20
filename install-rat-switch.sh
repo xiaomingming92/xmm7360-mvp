@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Part of xmm7360-mvp. SPDX-License-Identifier: GPL-2.0-only
 # 菜单里加「网络模式：自动 / 仅 4G / 仅 3G」所需的三件套：
 #   1) /usr/local/bin/fibocom-l850-rat      —— 发 AT+WS46 切制式（root）
 #   2) /usr/local/bin/fibocom-l850-daemon   —— D-Bus 后端新增 SetNetworkMode（polkit 门禁）

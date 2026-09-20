@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Part of xmm7360-mvp. SPDX-License-Identifier: GPL-2.0-only
 # 装上"每 10 分钟自检 + 不通就重跑 ensure"的定时器，并同步新版 ensure（更大重试预算）。
 # 用法：sudo ./install-selfheal-timer.sh
 set -euo pipefail

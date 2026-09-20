@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Part of xmm7360-mvp. SPDX-License-Identifier: GPL-2.0-only
 # 应用驱动的本地补丁（TX flush 丢帧后清计数 + 背压 + 限速日志）并重装 DKMS 模块。
 # 用法：sudo ./install-driver-patch.sh
 set -euo pipefail
