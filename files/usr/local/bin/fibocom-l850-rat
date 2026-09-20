@@ -1,0 +1,57 @@
+#!/bin/bash
+# fibocom-l850-rat — 切换网络模式（XMM7360 AT 口，需 root）。
+# 用法：fibocom-l850-rat auto|4g|3g|2g3g
+#
+# 依据 2026-09-20 本机实测：
+#   AT+WS46=?  → +WS46: (22,28,31)   ← 该固件支持这三种
+#   AT+WS46?   → +WS46: 28
+#   AT+COPS?   → +COPS: 0,0,"CHN-UNICOM",7（已注册 LTE）
+# 取值（3GPP 27.007）：
+#   12=GERAN(2G) 22=UTRAN(3G) 25=E-UTRAN(4G) 28=GERAN+UTRAN 31=GERAN+UTRAN+E-UTRAN
+#   —— 注意：本固件**不支持 25（仅 4G）**，所以 4g 这一档要用 Intel 私有命令
+#   AT+XACT 实现（取值待探测确认），在确认前本脚本明确报错而不是乱发命令。
+#
+# Part of xmm7360-driver local patches. SPDX-License-Identifier: GPL-3.0-or-later
+set -eu
+
+PORT=${PORT:-/dev/ttyXMM1}
+
+usage() { echo "usage: $0 auto|4g|3g|2g3g" >&2; exit 2; }
+[ "$#" -eq 1 ] || usage
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "fibocom-l850-rat: 需要 root（扩展通过 D-Bus 后端调用，无需 sudo）" >&2
+    exit 1
+fi
+[ -e "$PORT" ] || { echo "找不到 $PORT（模组驱动没加载？）" >&2; exit 1; }
+
+send_at() {
+    local cmd="$1" out
+    exec 3<>"$PORT"
+    stty -F "$PORT" raw -echo 2>/dev/null
+    printf '%s\r' "$cmd" >&3
+    out=$(timeout 2 cat <&3 || true)
+    exec 3<&-
+    echo "$out"
+    printf '%s' "$out" | grep -q "OK" || { echo "命令 $cmd 未返回 OK" >&2; return 1; }
+}
+
+case "$1" in
+    auto)      V=31 ;;   # 2G+3G+4G 全自动（4G 优先）
+    2g3g)      V=28 ;;   # 2G+3G
+    3g)        V=22 ;;   # 仅 3G（UTRAN）
+    4g)
+        echo "该固件不支持 WS46=25（仅 4G）：AT+WS46=? 只给 (22,28,31)。" >&2
+        echo "仅 4G 需要 AT+XACT（Intel 私有，取值待确认），暂未实现。" >&2
+        exit 3
+        ;;
+    *) usage ;;
+esac
+
+echo "设置网络模式 → AT+WS46=$V（$1）"
+send_at "AT+WS46=$V"
+echo "当前值：$(send_at 'AT+WS46?' | tr -d '\r')"
+
+echo "重新建立数据会话…"
+systemctl --no-block restart fibocom-l850-up.service 2>/dev/null || true
+

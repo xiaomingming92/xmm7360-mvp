@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  polkit actions for the Fibocom L850 / XMM7360 D-Bus service.
+
+  本地补丁（2026-09-20）：在上游的 set-apn 之外新增 set-mode
+  （切换网络制式 auto/4g/3g）。两者都由 fibocom-l850-daemon 通过 pkcheck
+  校验调用方，触发图形化认证提示；扩展自身从不执行特权命令。
+
+  Part of fibocom-l850-gnome-lte + xmm7360-driver local patches.
+  SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<policyconfig>
+  <vendor>fibocom-l850-gnome-lte</vendor>
+  <vendor_url>https://github.com/michaelruck/fibocom-l850-gnome-lte</vendor_url>
+
+  <action id="org.fibocom.l850.set-apn">
+    <description>Change the mobile data APN</description>
+    <message>Authentication is required to change the mobile data APN</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.fibocom.l850.set-mode">
+    <description>Change the mobile network mode (2G/3G/4G)</description>
+    <message>Authentication is required to change the mobile network mode</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

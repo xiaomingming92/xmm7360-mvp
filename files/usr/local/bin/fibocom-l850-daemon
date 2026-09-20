@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+# fibocom-l850-daemon — system D-Bus service for the Fibocom L850 / XMM7360 modem.
+#
+# 本地补丁（2026-09-20，作者 xmm + Codex）：在上游 v2 的基础上新增
+#   SetNetworkMode(s)  —— 切换网络制式（auto/4g/3g/2g3g），由 polkit 动作
+#                        org.fibocom.l850.set-mode 门禁，内部调用
+#                        /usr/local/bin/fibocom-l850-rat。
+#   其余（Status / SetEnabled / SetApn / pkcheck 逻辑）与上游完全一致。
+#
+# Part of fibocom-l850-gnome-lte. SPDX-License-Identifier: GPL-3.0-or-later
+import json
+import re
+import subprocess
+
+import dbus
+import dbus.service
+from dbus.mainloop.glib import DBusGMainLoop
+from gi.repository import GLib
+
+BUS_NAME = "org.fibocom.l850"
+OBJ_PATH = "/org/fibocom/l850"
+IFACE = "org.fibocom.l850"
+APN_ACTION = "org.fibocom.l850.set-apn"
+MODE_ACTION = "org.fibocom.l850.set-mode"
+
+STATUS_BIN = "/usr/local/bin/fibocom-l850-status"
+CTL_BIN = "/usr/local/bin/fibocom-l850-ctl"
+APN_BIN = "/usr/local/bin/fibocom-l850-apn"
+RAT_BIN = "/usr/local/bin/fibocom-l850-rat"
+
+APN_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+MODE_RE = re.compile(r"^(auto|4g|3g|2g3g)$")
+
+
+class ModemService(dbus.service.Object):
+    def __init__(self, bus):
+        super().__init__(bus, OBJ_PATH)
+        self._bus = bus
+
+    @dbus.service.method(IFACE, in_signature="", out_signature="s")
+    def Status(self):
+        try:
+            out = subprocess.run(
+                [STATUS_BIN], capture_output=True, text=True, timeout=15
+            )
+            text = (out.stdout or "").strip()
+            json.loads(text)  # validate — raises if not JSON
+            return text
+        except Exception as e:  # never let polling break on a transient error
+            return json.dumps({"state": "error", "error": str(e), "bars": 0})
+
+    @dbus.service.method(IFACE, in_signature="b", out_signature="")
+    def SetEnabled(self, enabled):
+        arg = "on" if enabled else "off"
+        r = subprocess.run([CTL_BIN, arg], capture_output=True, text=True, timeout=90)
+        if r.returncode != 0:
+            raise dbus.exceptions.DBusException(
+                (r.stderr or "toggle failed").strip(),
+                name=f"{IFACE}.Error.ToggleFailed",
+            )
+
+    @dbus.service.method(
+        IFACE, in_signature="s", out_signature="", sender_keyword="sender"
+    )
+    def SetApn(self, apn, sender=None):
+        if not APN_RE.match(apn or ""):
+            raise dbus.exceptions.DBusException(
+                "Invalid APN (letters, digits, dot, dash, underscore only)",
+                name=f"{IFACE}.Error.InvalidApn",
+            )
+        if not self._authorized(sender, APN_ACTION):
+            raise dbus.exceptions.DBusException(
+                "Not authorized to change the APN",
+                name=f"{IFACE}.Error.NotAuthorized",
+            )
+        r = subprocess.run([APN_BIN, apn], capture_output=True, text=True, timeout=120)
+        if r.returncode != 0:
+            raise dbus.exceptions.DBusException(
+                (r.stderr or "APN change failed").strip(),
+                name=f"{IFACE}.Error.ApnFailed",
+            )
+
+    @dbus.service.method(
+        IFACE, in_signature="s", out_signature="", sender_keyword="sender"
+    )
+    def SetNetworkMode(self, mode, sender=None):
+        if not MODE_RE.match(mode or ""):
+            raise dbus.exceptions.DBusException(
+                "Invalid mode (auto|4g|3g|2g3g)",
+                name=f"{IFACE}.Error.InvalidMode",
+            )
+        if not self._authorized(sender, MODE_ACTION):
+            raise dbus.exceptions.DBusException(
+                "Not authorized to change the network mode",
+                name=f"{IFACE}.Error.NotAuthorized",
+            )
+        r = subprocess.run([RAT_BIN, mode], capture_output=True, text=True, timeout=120)
+        if r.returncode != 0:
+            raise dbus.exceptions.DBusException(
+                (r.stderr or "mode change failed").strip(),
+                name=f"{IFACE}.Error.ModeFailed",
+            )
+
+    # Ask polkit whether the calling bus connection may perform `action`.
+    # pkcheck resolves the caller from its unique bus name and drives the
+    # graphical authentication agent when interaction is allowed.
+    def _authorized(self, sender, action):
+        if not sender:
+            return False
+        try:
+            r = subprocess.run(
+                [
+                    "pkcheck",
+                    "--action-id", action,
+                    "--system-bus-name", str(sender),
+                    "--allow-user-interaction",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+            return r.returncode == 0
+        except Exception:
+            return False
+
+
+def main():
+    DBusGMainLoop(set_as_default=True)
+    bus = dbus.SystemBus()
+    # Keep a reference to the BusName: dbus-python releases the well-known name
+    # as soon as this object is garbage-collected.
+    bus_name = dbus.service.BusName(BUS_NAME, bus)
+    service = ModemService(bus)
+    service._bus_name = bus_name
+    GLib.MainLoop().run()
+
+
+if __name__ == "__main__":
+    main()

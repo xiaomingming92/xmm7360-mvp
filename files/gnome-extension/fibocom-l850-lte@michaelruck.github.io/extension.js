@@ -49,6 +49,10 @@ const T = ZH ? {
     signal: '信号',
     operator: '运营商',
     network: '网络',
+    networkMode: '网络模式',
+    modeAuto: '自动（2G/3G/4G）',
+    mode4g: '仅 4G（LTE）',
+    mode3g: '仅 3G（UMTS）',
     settings: '设置',
 } : {
     title: 'Mobile Network',
@@ -63,6 +67,10 @@ const T = ZH ? {
     signal: 'Signal',
     operator: 'Operator',
     network: 'Network',
+    networkMode: 'Network mode',
+    modeAuto: 'Automatic (2G/3G/4G)',
+    mode4g: '4G only (LTE)',
+    mode3g: '3G only (UMTS)',
     settings: 'Settings',
 };
 
@@ -130,6 +138,18 @@ class LteToggle extends QuickMenuToggle {
         this.menu.addMenuItem(this._operatorItem);
         this.menu.addMenuItem(this._networkItem);
         this.menu.addMenuItem(this._apnItem);
+
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+        // 网络模式（需要特权：走 D-Bus SetNetworkMode → fibocom-l850-rat → AT+WS46）
+        this._modeMenu = new PopupMenu.PopupSubMenuMenuItem(T.networkMode);
+        for (const [mode, label] of [['auto', T.modeAuto], ['4g', T.mode4g],
+                                     ['3g', T.mode3g]]) {
+            const item = new PopupMenu.PopupMenuItem(label);
+            item.connect('activate', () => this._setMode(mode));
+            this._modeMenu.menu.addMenuItem(item);
+        }
+        this.menu.addMenuItem(this._modeMenu);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         this._refreshItem = new PopupMenu.PopupMenuItem(T.reconnect);
@@ -207,6 +227,22 @@ class LteToggle extends QuickMenuToggle {
             Gio.DBusCallFlags.NONE, 90000, null,
             (bus, res) => {
                 try { bus.call_finish(res); } catch (e) { logError(e); }
+                this._sync();
+            });
+    }
+
+    _setMode(mode) {
+        this._setSubtitle(T.connecting);
+        Gio.DBus.system.call(
+            BUS_NAME, OBJ_PATH, IFACE, 'SetNetworkMode',
+            new GLib.Variant('(s)', [mode]), null,
+            Gio.DBusCallFlags.NONE, 90000, null,
+            (bus, res) => {
+                try {
+                    bus.call_finish(res);
+                } catch (e) {
+                    logError(e);
+                }
                 this._sync();
             });
     }
