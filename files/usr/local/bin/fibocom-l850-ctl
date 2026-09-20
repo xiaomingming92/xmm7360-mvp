@@ -57,6 +57,13 @@ try_up() {
 
 case "${1:-}" in
   on)
+    # 如果 ensure 正在跑，别打断它！否则每次事件都 restart 一次 bring-up，
+    # 它会永远跑不完（2026-09-20 实测：IPv6 RA 抖动让守护每 15 秒触发一次）。
+    state=$(systemctl is-active fibocom-l850-up.service 2>/dev/null || true)
+    if [ "$state" = "activating" ] || pgrep -f 'fibocom-l850-up-retry' >/dev/null 2>&1; then
+        echo "ensure 正在运行（$state），本次不打断" >&2
+        exit 0
+    fi
     if try_up; then
         ensure_route
     else

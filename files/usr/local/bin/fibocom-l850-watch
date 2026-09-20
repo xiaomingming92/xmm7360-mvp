@@ -21,7 +21,7 @@ set -u
 
 IFACE=${IFACE:-wwan0}
 PROBE_INTERVAL=${PROBE_INTERVAL:-120}   # 探针周期（秒）
-DEBOUNCE=${DEBOUNCE:-5}                 # 事件去抖窗口（秒）
+DEBOUNCE=${DEBOUNCE:-30}                # 事件去抖窗口（秒）——IPv6 RA 抖动很密，放宽
 CTL=/usr/local/bin/fibocom-l850-ctl
 LAST=/run/fibocom-l850-watch.last
 
@@ -66,9 +66,13 @@ journalctl -k -f -o cat 2>/dev/null |
         act "kernel: ${line:0:120}"
     done &
 
-# 事件源 ②：netlink 链路/地址/路由变化（只关心我们的接口）
+# 事件源 ②：netlink 链路/IPv4 地址/路由变化
+# 只关心 IPv4 与链路状态：IPv6 的 RA / link-local / 地址来回抖动是这个模组的常态
+# （每次会话建立都会刷一遍），如果全收就会把 bring-up 反复打断（2026-09-20 踩到）。
 ip monitor link route address 2>/dev/null |
     grep --line-buffered "$IFACE" |
+    grep -v -E "inet6|fe80|ff00|proto ra|table local" |
+    grep --line-buffered -E "^[0-9]+: $IFACE| inet |state (DOWN|UP|UNKNOWN)" |
     while IFS= read -r line; do
         act "netlink: ${line:0:120}"
     done &
@@ -78,4 +82,3 @@ while :; do
     sleep "$PROBE_INTERVAL"
     healthy || act "probe: 链路/IP/ping 不健康"
 done
-

@@ -7,8 +7,10 @@ ROOT=/home/xmm/ai/xmm7360-driver
 [[ $EUID -eq 0 ]] || { echo "需要 root：sudo $0" >&2; exit 1; }
 log() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 
-log "1/4 安装守护脚本与单元"
+log "1/4 安装守护脚本、状态助手（修正 off 误判）与 ctl（不打断运行中的 ensure）"
 install -m 755 "$ROOT/files/usr/local/bin/fibocom-l850-watch" /usr/local/bin/fibocom-l850-watch
+install -m 755 "$ROOT/files/usr/local/bin/fibocom-l850-status" /usr/local/bin/fibocom-l850-status
+install -m 755 "$ROOT/files/usr/local/bin/fibocom-l850-ctl" /usr/local/bin/fibocom-l850-ctl
 install -m 644 "$ROOT/files/etc/systemd/system/fibocom-l850-watch.service" /etc/systemd/system/
 
 log "2/4 自检降频（5min → 30min，探针交给守护做）"
