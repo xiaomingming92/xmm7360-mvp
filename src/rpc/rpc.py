@@ -385,15 +385,27 @@ def do_fcc_unlock(r):
     fcc_chal_resp = r.execute('CsiFccLockGenChallengeReq', is_async=True)
     _, fcc_chal = unpack('nn', fcc_chal_resp['body'])
     chal_bytes = struct.pack('<L', fcc_chal)
-    # read out from nvm:fix_cat_fcclock.fcclock_hash[0]={0x3D,0xF8,0xC7,0x19}
-    key = bytearray([0x3d, 0xf8, 0xc7, 0x19])
-    resp_bytes = hashlib.sha256(chal_bytes + key).digest()
-    resp = struct.unpack('<L', resp_bytes[:4])[0]
-    unlock_resp = r.execute('CsiFccLockVerChallengeReq',
-                            pack('L', resp), is_async=True)
-    resp = unpack('n', unlock_resp['body'])[0]
-    if resp != 1:
-        raise IOError("FCC unlock failed")
+    # 本地补丁（2026-09-20，见上游 issue #240）：
+    # key 是**设备相关**的——出厂/重刷固件后的模组（nvm 被重置）用全零 hash，
+    # 而上游硬编码的 [0x3D,0xF8,0xC7,0x19] 只对未重置的模组有效。
+    # FCC 锁没解开时模组不会应答 RPC，表现就是"卡在第一条命令 / 注册不上"。
+    # 这里依次尝试，成功即返回。
+    keys = [
+        bytearray([0x3d, 0xf8, 0xc7, 0x19]),   # 上游硬编码（nvm:fix_cat_fcclock）
+        bytearray([0x00, 0x00, 0x00, 0x00]),   # 工厂重置 / 重刷固件后
+    ]
+    for key in keys:
+        resp_bytes = hashlib.sha256(chal_bytes + key).digest()
+        resp = struct.unpack('<L', resp_bytes[:4])[0]
+        unlock_resp = r.execute('CsiFccLockVerChallengeReq',
+                                pack('L', resp), is_async=True)
+        ok = unpack('n', unlock_resp['body'])[0]
+        print("FCC unlock attempt key=%s -> %s"
+              % (bytearray(key).hex(), "OK" if ok == 1 else "failed"))
+        if ok == 1:
+            print("FCC unlock successful!")
+            return
+    raise IOError("FCC unlock failed (tried %d keys, see upstream issue #240)" % len(keys))
 
 
 if __name__ == "__main__":

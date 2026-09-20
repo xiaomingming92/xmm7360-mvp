@@ -48,6 +48,14 @@ except Exception as ex:
 
 ipr = IPRoute()
 
+# 本地补丁（2026-09-20）：先试一次 FCC 解锁，再走初始化序列。
+# 重刷/重置过固件的模组在 FCC 锁解开前不应答 RPC（表现为卡在第一条 SmsInit），
+# 见上游 issue #240。失败不致命——原来位置（SmsInit 之后）还会再试一次。
+try:
+    rpc.do_fcc_unlock(r)
+except Exception as ex:
+    logging.warning("early FCC unlock attempt failed: %s", ex)
+
 r.execute('UtaMsSmsInit')
 r.execute('UtaMsCbsInit')
 r.execute('UtaMsNetOpen')
