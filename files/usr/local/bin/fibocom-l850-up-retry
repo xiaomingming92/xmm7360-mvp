@@ -19,6 +19,15 @@ log() { logger -t fibocom-l850-retry -- "$*"; echo "$*"; }
 have_ipv4() { ip -4 addr show wwan0 2>/dev/null | grep -q 'inet '; }
 kill_strays() { pkill -f 'open_xdatachannel.py' 2>/dev/null || true; sleep 2; }
 
+# 单实例锁：面板开关/自检 timer/装脚本都会 restart 服务，如果因此跑出多个实例，
+# 它们会互相抢 /dev/xmm0/rpc，反而谁都初始化不成（2026-09-20 实测踩到）。
+LOCK=/run/fibocom-l850-up-retry.lock
+exec 9>"$LOCK"
+if ! flock -n 9; then
+    log "已有 ensure 在跑（$LOCK 被占用），本次直接退出，避免多实例互抢"
+    exit 0
+fi
+
 RUN_TIMEOUT=${RUN_TIMEOUT:-90}        # 单次 bring-up 超时
 TRIES_PER_ROUND=${TRIES_PER_ROUND:-4} # 同一模块加载下重试次数（#186 的关键）
 ROUNDS=${ROUNDS:-3}                   # 失败后"重载模块再来一轮"的轮数

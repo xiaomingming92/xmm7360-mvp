@@ -21,6 +21,12 @@ if [ "$state" = "activating" ]; then
     exit 0
 fi
 
+# 服务状态可能已经 failed/inactive，但上一轮的 ensure 进程还在（服务被 kill 不会
+# 连带杀掉它的子进程）——也要让路，否则又是多实例互抢 RPC 设备。
+if pgrep -f 'fibocom-l850-up-retry' >/dev/null 2>&1; then
+    logger -t fibocom-l850-selfheal -- "自检失败，但仍有 ensure 进程在跑，不打断"
+    exit 0
+fi
+
 logger -t fibocom-l850-selfheal -- "自检失败（无 IPv4 或 ping 不通）→ 重跑 ensure"
 systemctl --no-block restart fibocom-l850-up.service 2>/dev/null || true
-
