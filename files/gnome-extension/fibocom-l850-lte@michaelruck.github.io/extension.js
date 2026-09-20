@@ -32,11 +32,79 @@ const ICON_BY_BARS = [
 ];
 const ICON_OFF = 'network-cellular-offline-symbolic';
 
+// 文案与 GNOME 自身保持一致（用词取自 gnome-shell / gnome-control-center 的 zh_CN 翻译）：
+//   Mobile Network→移动网络、Connected→已连接、Disconnected→已断开、
+//   Connect→连接、Disconnect→断开连接、Turn Off→关闭、Settings→设置、APN→APN
+const ZH = (GLib.get_language_names()[0] || 'en').toLowerCase().startsWith('zh');
+const T = ZH ? {
+    title: '移动网络',
+    connecting: '正在连接…',
+    disconnecting: '正在断开…',
+    off: '已关闭',
+    absent: '模组未就绪',
+    unavailable: '不可用',
+    disconnected: '已断开',
+    reconnect: '重新连接',
+    apnPrefix: 'APN',
+    signal: '信号',
+    operator: '运营商',
+    network: '网络',
+    settings: '设置',
+} : {
+    title: 'Mobile Network',
+    connecting: 'Connecting…',
+    disconnecting: 'Disconnecting…',
+    off: 'Turned off',
+    absent: 'Modem not ready',
+    unavailable: 'Unavailable',
+    disconnected: 'Disconnected',
+    reconnect: 'Reconnect',
+    apnPrefix: 'APN',
+    signal: 'Signal',
+    operator: 'Operator',
+    network: 'Network',
+    settings: 'Settings',
+};
+
+// EARFCN → LTE 频段（只列常用频段；查不到就显示原始 EARFCN）
+const LTE_BANDS = [
+    [1, 0, 599], [2, 600, 1199], [3, 1200, 1949], [4, 1950, 2399],
+    [5, 2400, 2649], [7, 2750, 3449], [8, 3450, 3799], [20, 6150, 6449],
+    [28, 9210, 9659], [38, 37750, 38249], [39, 38250, 38649],
+    [40, 38650, 39649], [41, 39650, 41589],
+];
+
+function bandFromEarfcn(earfcn) {
+    if (typeof earfcn !== 'number')
+        return null;
+    for (const [band, lo, hi] of LTE_BANDS) {
+        if (earfcn >= lo && earfcn <= hi)
+            return band;
+    }
+    return null;
+}
+
+// RAT → 用户熟悉的制式说法（GNOME 网络面板用 4G/3G/2G 这种叫法）
+function ratLabel(rat) {
+    if (!rat)
+        return '—';
+    const r = String(rat).toUpperCase();
+    if (r.includes('LTE'))
+        return ZH ? '4G（LTE）' : '4G (LTE)';
+    if (r.includes('UMTS') || r.includes('HSDPA') || r.includes('HSPA'))
+        return ZH ? '3G（UMTS）' : '3G (UMTS)';
+    if (r.includes('GSM') || r.includes('EDGE') || r.includes('GPRS'))
+        return ZH ? '2G（GSM）' : '2G (GSM)';
+    if (r.includes('NR'))
+        return ZH ? '5G（NR）' : '5G (NR)';
+    return String(rat);
+}
+
 const LteToggle = GObject.registerClass(
 class LteToggle extends QuickMenuToggle {
     _init(settings, openPrefs) {
         super._init({
-            title: 'Mobile Data',
+            title: T.title,
             iconName: ICON_OFF,
             toggleMode: true,
             menuEnabled: true,
@@ -48,20 +116,30 @@ class LteToggle extends QuickMenuToggle {
         this.connect('clicked', () => this._setState(this.checked));
 
         // 菜单：和 GNOME 自带磁贴一样，右侧 > 打开菜单
-        this.menu.setHeader('network-cellular-symbolic', 'Mobile Data');
-        this._refreshItem = new PopupMenu.PopupMenuItem('刷新状态');
+        this.menu.setHeader('network-cellular-symbolic', T.title);
+
+        // 详情行（只读）：信号 / 运营商 / 网络（制式·频段·EARFCN）/ APN
+        this._signalItem = new PopupMenu.PopupMenuItem(`${T.signal}：—`);
+        this._operatorItem = new PopupMenu.PopupMenuItem(`${T.operator}：—`);
+        this._networkItem = new PopupMenu.PopupMenuItem(`${T.network}：—`);
+        this._apnItem = new PopupMenu.PopupMenuItem(`${T.apnPrefix}：…`);
+        for (const item of [this._signalItem, this._operatorItem,
+                            this._networkItem, this._apnItem])
+            item.setSensitive(false);
+        this.menu.addMenuItem(this._signalItem);
+        this.menu.addMenuItem(this._operatorItem);
+        this.menu.addMenuItem(this._networkItem);
+        this.menu.addMenuItem(this._apnItem);
+
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        this._refreshItem = new PopupMenu.PopupMenuItem(T.reconnect);
         this._refreshItem.connect('activate', () => {
             this._sync();
             this.menu.close();
         });
         this.menu.addMenuItem(this._refreshItem);
 
-        this._apnItem = new PopupMenu.PopupMenuItem('APN: …');
-        this._apnItem.setSensitive(false);
-        this.menu.addMenuItem(this._apnItem);
-
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        this._prefsItem = new PopupMenu.PopupMenuItem('扩展设置…');
+        this._prefsItem = new PopupMenu.PopupMenuItem(`${T.settings}…`);
         this._prefsItem.connect('activate', () => {
             try {
                 this._openPrefs?.();
@@ -72,7 +150,7 @@ class LteToggle extends QuickMenuToggle {
         });
         this.menu.addMenuItem(this._prefsItem);
 
-        this._apnItem.label.text = `APN: ${this._readApn()}`;
+        this._apnItem.label.text = `${T.apnPrefix}：${this._readApn()}`;
 
         this._subtitleOk = true;
         this._busy = false;
@@ -116,7 +194,7 @@ class LteToggle extends QuickMenuToggle {
     }
 
     _setState(on) {
-        this._setSubtitle(on ? 'connecting…' : 'disconnecting…');
+        this._setSubtitle(on ? T.connecting : T.disconnecting);
         Gio.DBus.system.call(
             BUS_NAME, OBJ_PATH, IFACE, 'SetEnabled',
             new GLib.Variant('(b)', [on]), null,
@@ -154,6 +232,32 @@ class LteToggle extends QuickMenuToggle {
         if (this.checked !== connected)
             this.set({checked: connected});
 
+        // 详情行
+        if (typeof d.rsrp_dbm === 'number') {
+            const bars = Math.max(0, Math.min(4, d.bars ?? 0));
+            this._signalItem.label.text = `${T.signal}：${d.rsrp_dbm} dBm（RSRP）· ${bars}/4`;
+        } else {
+            this._signalItem.label.text = `${T.signal}：—`;
+        }
+        if (d.operator || d.mcc) {
+            const plmn = (d.mcc && d.mnc !== undefined)
+                ? `（${d.mcc}/${String(d.mnc).padStart(2, '0')}）` : '';
+            this._operatorItem.label.text = `${T.operator}：${d.operator ?? '—'}${plmn}`;
+        } else {
+            this._operatorItem.label.text = `${T.operator}：—`;
+        }
+        if (connected) {
+            const band = bandFromEarfcn(d.earfcn);
+            const parts = [ratLabel(d.rat)];
+            if (band)
+                parts.push(`${ZH ? '频段' : 'Band'} B${band}`);
+            if (typeof d.earfcn === 'number')
+                parts.push(`EARFCN ${d.earfcn}`);
+            this._networkItem.label.text = `${T.network}：${parts.join(' · ')}`;
+        } else {
+            this._networkItem.label.text = `${T.network}：—`;
+        }
+
         if (connected) {
             const bars = Math.max(0, Math.min(4, d.bars ?? 0));
             this.set({iconName: ICON_BY_BARS[bars]});
@@ -161,19 +265,19 @@ class LteToggle extends QuickMenuToggle {
             if (d.operator) parts.push(d.operator);
             if (d.rat) parts.push(d.rat);
             if (typeof d.rsrp_dbm === 'number') parts.push(`${d.rsrp_dbm} dBm`);
-            this._setSubtitle(parts.join(' · ') || 'Connected');
+            this._setSubtitle(parts.join(' · ') || T.disconnected);
         } else if (d.state === 'off') {
             this.set({iconName: ICON_OFF});
-            this._setSubtitle('Off');
+            this._setSubtitle(T.off);
         } else if (d.state === 'absent') {
             this.set({iconName: ICON_OFF});
-            this._setSubtitle('Modem off');
+            this._setSubtitle(T.absent);
         } else if (d.state === 'error') {
             this.set({iconName: ICON_OFF});
-            this._setSubtitle('Unavailable');
+            this._setSubtitle(T.unavailable);
         } else {
             this.set({iconName: ICON_OFF});
-            this._setSubtitle('Disconnected');
+            this._setSubtitle(T.disconnected);
         }
     }
 
@@ -213,4 +317,3 @@ export default class FibocomLteExtension extends Extension {
         this._indicator = null;
     }
 }
-
