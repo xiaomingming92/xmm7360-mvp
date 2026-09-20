@@ -1,0 +1,43 @@
+#!/bin/bash
+# 带重试的 bring-up 包装脚本（本地补丁，2026-09-20）。
+#
+# 为什么需要：上游 open_xdatachannel.py 在模组刚上电、内部初始化还没完成时，
+# 会卡在 "RPC executing UtaMsSmsInit" 之后不动 —— 此时进程常驻并占着
+# /dev/xmm0/rpc，于是：
+#   * 数据会话建立不完全（wwan0 拿不到 IPv4）；
+#   * 面板的状态查询读不到 RPC 设备（Errno 16 busy）→ 信号显示 0。
+# 我们唯一一次成功（09:07）是模块加载后静置约 4 分钟才发起的初始化。
+# 所以这里：先等一段时间 → 跑 bring-up（带超时）→ 用"wwan0 是否有 IPv4"判成功
+# → 失败就清理 + 重载模块再试，最多 3 轮。
+set -u
+
+log() { logger -t fibocom-l850-retry -- "$*"; echo "$*"; }
+have_ipv4() { ip -4 addr show wwan0 2>/dev/null | grep -q 'inet '; }
+
+SETTLE=${SETTLE:-30}       # 每轮开始前的静置时间
+RUN_TIMEOUT=${RUN_TIMEOUT:-180}
+MAX_TRIES=${MAX_TRIES:-3}
+
+for attempt in $(seq 1 "$MAX_TRIES"); do
+  log "第 $attempt/$MAX_TRIES 轮：静置 ${SETTLE}s 后跑 bring-up（超时 ${RUN_TIMEOUT}s）"
+  sleep "$SETTLE"
+
+  timeout -k 5 "$RUN_TIMEOUT" /usr/local/bin/fibocom-l850-up
+  rc=$?
+
+  if have_ipv4; then
+    log "第 $attempt 轮成功：wwan0 已有 IPv4（bring-up rc=$rc，上游正常路径就是 1）"
+    exit 0
+  fi
+
+  log "第 $attempt 轮未拿到 IPv4（rc=$rc）→ 清理残留进程 + 重载 xmm7360 模块"
+  pkill -f 'open_xdatachannel.py' 2>/dev/null || true
+  sleep 2
+  modprobe -r xmm7360 2>/dev/null || true
+  sleep 3
+  modprobe xmm7360 2>/dev/null || true
+done
+
+log "3 轮都没成功：建议关机（完全断电）再开机，让开机那一次 bring-up 自己跑完"
+exit 1
+
