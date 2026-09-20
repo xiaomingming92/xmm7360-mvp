@@ -58,6 +58,13 @@ for round in $(seq 1 "$ROUNDS"); do
 
   if [ "$round" -lt "$ROUNDS" ]; then
     log "本轮 $TRIES_PER_ROUND 次都没成功 → 重载 xmm7360 模块后再来一轮"
+    # 顺手把网络模式纠成"自动（含 4G）"：刷固件会把 WS46 重置成 28（只有 2G+3G），
+    # 而联通 2G/3G 多地已关 → 表现就是"有 SIM、无信号、注册不上"（今天踩过）。
+    if [ -x /usr/local/bin/fibocom-l850-rat ]; then
+        log "顺带纠正网络模式为自动（AT+WS46=31）"
+        /usr/local/bin/fibocom-l850-rat auto >/dev/null 2>&1 || true
+        sleep 5
+    fi
     kill_strays
     modprobe -r xmm7360 2>/dev/null || true
     sleep 3

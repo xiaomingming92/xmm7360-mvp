@@ -139,6 +139,15 @@ sudo /home/xmm/ai/xmm7360-driver/install-gnome-layer.sh
 ## 已知限制（来自驱动本身）
 
 - **没有电源管理**：挂起后模组掉线，必须重新配置 —— 这就是 `xmm7360-resume.service` 的作用；
+- **重刷模组固件后必须做两件事**（2026-09-20 实测，刷国际版后卡了两小时就是这两条）：
+  1. **FCC 锁的 key 会被重置为全零**：上游 `rpc.py` 硬编码 `[0x3d,0xf8,0xc7,0x19]`
+     解不开工厂重置过的模组（上游 issue #240），FCC 未解锁时模组**不应答任何 RPC**，
+     表现是"卡在 `UtaMsSmsInit` / 一直不注册"。产物里的 `src/rpc/rpc.py::do_fcc_unlock()`
+     已改为依次尝试两个 key，`open_xdatachannel.py` 也把 FCC 解锁提到初始化最前面；
+  2. **网络模式偏好会被重置成 `AT+WS46=28`（只有 2G+3G）**：国内 2G/3G 多地已关，
+     于是"有 SIM、`AT+CSQ: 99,99` 无信号、`AT+COPS: 2` 搜索中、注册不上"。
+     用 `sudo /usr/local/bin/fibocom-l850-rat auto`（或面板 菜单→网络模式→自动）改回
+     `AT+WS46=31`（2G+3G+4G）即可；ensure 在连续失败时也会自动纠一次。
 - **不要用 ACPI `_RST` 当恢复手段**（2026-09-20 实测教训）：在模组已经被初始化过之后执行
   `echo 1 > /sys/bus/pci/devices/0000:05:00.0/reset`，会让它停在
   `modem still booting, waiting...` → `unknown modem status: 0xffffffff`，
