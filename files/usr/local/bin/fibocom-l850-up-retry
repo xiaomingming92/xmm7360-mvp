@@ -137,6 +137,11 @@ run_bringup() {
 }
 
 if healthy; then
+  # 快速路径也要把硬恢复标记消费掉：链路真健康（链路+IPv4+ping 都通）时不需要动模块，
+  # 留着标记只会在 120 秒内把某次无关的恢复带成硬恢复。
+  if hard_requested; then
+      log "wwan0 已健康 → 丢弃硬恢复标记（不需要重载模块）"
+  fi
   log "wwan0 已健康（链路 + IPv4 + ping $PROBE_IP 通），无需动作"
   exit 0
 fi

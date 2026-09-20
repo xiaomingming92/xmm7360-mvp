@@ -25,6 +25,10 @@ METRIC=1000
 HARD_STAMP=${HARD_STAMP:-/run/fibocom-l850-force-hard}
 [ -r "$CONF" ] && . "$CONF"
 
+# watcher 调本脚本时把 stdout/stderr 都丢掉了（>/dev/null 2>&1），
+# 所以关键判断必须同时写 journal，否则运维上是黑盒（2026-09-20 晚演练踩到）。
+log() { logger -t fibocom-l850-ctl -- "$*"; echo "$*" >&2; }
+
 # 可用 = 链路起来了 **且** 有 IPv4 **且真能通**（ping 一次）
 # 为什么要 ping：会话进程退出后，IP 和路由会残留成"陈旧地址"，
 # 只看 state/inet 会误判为在线，导致"已连接但没网"时自愈不触发。
@@ -69,22 +73,24 @@ case "${1:-}" in
     # 这样即便 ensure 正在跑，它也会在下一次尝试前读到标记并立刻转硬恢复。
     if [ "${2:-}" = "--hard" ] || [ "${2:-}" = "hard" ]; then
         date +%s > "$HARD_STAMP" 2>/dev/null || true
-        echo "已置硬恢复标记（$HARD_STAMP）" >&2
+        log "收到 --hard：已置硬恢复标记（$HARD_STAMP）"
     fi
     # 如果 ensure 正在跑，别打断它！否则每次事件都 restart 一次 bring-up，
     # 它会永远跑不完（2026-09-20 实测：IPv6 RA 抖动让守护每 15 秒触发一次）。
     state=$(systemctl is-active fibocom-l850-up.service 2>/dev/null || true)
     if [ "$state" = "activating" ] || pgrep -f 'fibocom-l850-up-retry' >/dev/null 2>&1; then
-        echo "ensure 正在运行（$state），本次不打断" >&2
+        log "ensure 正在运行（$state），本次不打断（硬恢复标记留给它，会在下次尝试前被读到）"
         exit 0
     fi
     if try_up; then
-        # 链路本来就是好的（ping 通）→ 说明没有驱动错误态，标记作废，
-        # 免得 120 秒内下一次无关的恢复被它带成硬恢复
-        rm -f "$HARD_STAMP" 2>/dev/null || true
+        # 链路此刻是好的（ping 通）→ 本次不动作。但标记**故意留着**（120 秒内有效）：
+        # 驱动错误态常见形态就是"内核已经报错、链路还能 ping 一两下"，
+        # 标记留着，等它真掉下去、ensure 一起来就直接走硬恢复；
+        # 到那时如果 ensure 一看链路是好的，它自己会把标记丢弃（见 up-retry 的快速路径）。
+        log "链路当前健康（链路+IPv4+ping 通）→ 不动作；硬恢复标记保留（120s 内有效）"
         ensure_route
     else
-        echo "wwan0 还没有 IPv4 → 交给 ensure 服务在后台重试（#186 策略）" >&2
+        log "wwan0 还不通 → 交给 ensure 服务在后台重试（#186 策略，带硬恢复意图）"
         systemctl --no-block restart fibocom-l850-up.service 2>/dev/null || true
     fi
     ;;

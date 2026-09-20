@@ -30,6 +30,8 @@ PROBE_INTERVAL=${PROBE_INTERVAL:-120}   # 探针周期（秒）
 DEBOUNCE=${DEBOUNCE:-30}                # 事件去抖窗口（秒）——IPv6 RA 抖动很密，放宽
 CTL=/usr/local/bin/fibocom-l850-ctl
 LAST=/run/fibocom-l850-watch.last
+# 硬恢复标记（与 fibocom-l850-ctl / fibocom-l850-up-retry 共用同一个路径）
+HARD_STAMP=${HARD_STAMP:-/run/fibocom-l850-force-hard}
 
 log() { logger -t fibocom-l850-watch -- "$*"; }
 
@@ -76,6 +78,13 @@ act() {
     now=$(date +%s)
     [ -r "$LAST" ] && last=$(cat "$LAST" 2>/dev/null || echo 0)
     if [ $(( now - last )) -lt "$DEBOUNCE" ]; then
+        # 硬事件（驱动级错误态）即便落在去抖窗口里也不能丢：不重复触发恢复，
+        # 但要把标记落盘 —— 否则"先来个链路抖动、30 秒内才报 bad status"这种顺序下，
+        # 硬提示会被去抖吃掉，恢复又退化成 4 次注定失败的软重试。
+        if [ "$mode" = hard ]; then
+            date +%s > "$HARD_STAMP" 2>/dev/null || true
+            log "硬事件落在去抖窗口内：只置硬恢复标记（$1）"
+        fi
         return 0
     fi
     echo "$now" > "$LAST"
