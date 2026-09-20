@@ -16,6 +16,12 @@
 # 动作：事件去抖后调用 fibocom-l850-ctl on，由它走完整恢复阶梯：
 #       诊断 → 软恢复（bring-up + #186 重试）→ 硬恢复（重载 xmm7360）→ 复核 ping
 #
+# 2026-09-20 晚补强（依据当晚 20:26–20:57 那场 31 分钟抖动）：
+#   ① 触发前先做"取证快照"（tag: fibocom-l850-snap）——那晚有多次
+#      "IPv4 在、ping 死、内核一条日志都没有"的静默楔形，事后无法定性；
+#   ② 内核事件分两类：驱动级错误态（Failed to ship / bad status / crashed…）→
+#      直接 `ctl on --hard`（跳过注定失败的软重试），其余 → 软恢复。
+#
 # Part of xmm7360-driver local patches. SPDX-License-Identifier: GPL-3.0-or-later
 set -u
 
@@ -27,6 +33,32 @@ LAST=/run/fibocom-l850-watch.last
 
 log() { logger -t fibocom-l850-watch -- "$*"; }
 
+# 取证快照：把"触发这一刻到底什么状态"钉进 journal，专门给"下次复现能定性"用。
+# 只看**外部可见**的东西：
+#   · 内核最后一条 xmm7360 消息 + Failed to ship 计数 → 驱动是否进了错误态
+#   · /dev/xmm0/rpc 的持有者 → bring-up 报 [Errno 16] Device or resource busy 的真凶
+#   · 地址/路由/会话进程 → 区分"陈旧地址"与"真会话"
+# 故意**不查 Status**：status 会打开 /dev/xmm0/rpc，可能把紧接着的 bring-up 顶成 EBUSY。
+snapshot() {
+    local kmsg addr route holders procs link
+    kmsg=$(journalctl -k -n 200 -o cat 2>/dev/null | grep -i xmm7360 | tail -1)
+    addr=$(ip -4 addr show "$IFACE" 2>/dev/null | awk '/inet /{printf "%s ", $2}')
+    route=$(ip route show default dev "$IFACE" 2>/dev/null | tr '\n' ' ')
+    holders=$(fuser -v /dev/xmm0/rpc 2>&1 | tail -n +2 | tr '\n' ' ')
+    procs=$(pgrep -af open_xdatachannel.py 2>/dev/null | tr '\n' ' ')
+    link=$(ip link show "$IFACE" 2>/dev/null | head -1)
+    {
+        printf '原因: %s\n' "$1"
+        printf '内核尾: %s\n' "${kmsg:-（无 xmm7360 消息）}"
+        printf 'ship失败计数: %s\n' "$(journalctl -k -b -o cat 2>/dev/null | grep -c 'Failed to ship')"
+        printf 'rpc持有者: %s\n' "${holders:-（无人持有）}"
+        printf '地址: %s\n' "${addr:-（无 IPv4）}"
+        printf '路由: %s\n' "${route:-（无 wwan0 默认路由）}"
+        printf '会话进程: %s\n' "${procs:-（无）}"
+        printf '链路: %s\n' "${link:-（接口不存在）}"
+    } | logger -t fibocom-l850-snap -- 
+}
+
 PROBE_IP=$(printf '%s' "$(sed -n 's/^DNS=//p' /etc/fibocom-l850-lte/modem.conf 2>/dev/null)" \
            | tr -d '"' | awk '{print $1}')
 [ -n "${PROBE_IP:-}" ] || PROBE_IP=223.5.5.5
@@ -37,17 +69,24 @@ healthy() {
         ping -c 1 -W 3 -I "$IFACE" "$PROBE_IP" >/dev/null 2>&1
 }
 
-# 去抖 + 触发恢复（事件可能连成一串，5 秒内只动作一次）
+# 去抖 + 触发恢复（事件可能连成一串，DEBOUNCE 秒内只动作一次）
+# $1=原因  $2=soft|hard（hard 表示"驱动级错误态，软重试注定白费"）
 act() {
-    local now last=0
+    local now last=0 mode=${2:-soft}
     now=$(date +%s)
     [ -r "$LAST" ] && last=$(cat "$LAST" 2>/dev/null || echo 0)
     if [ $(( now - last )) -lt "$DEBOUNCE" ]; then
         return 0
     fi
     echo "$now" > "$LAST"
-    log "触发恢复：$1"
-    "$CTL" on >/dev/null 2>&1 || log "ctl on 返回非 0（细节见 fibocom-l850-retry 日志）"
+    snapshot "$1 [$mode]"
+    if [ "$mode" = hard ]; then
+        log "触发恢复（硬恢复）：$1"
+        "$CTL" on --hard >/dev/null 2>&1 || log "ctl on --hard 返回非 0（细节见 fibocom-l850-retry 日志）"
+    else
+        log "触发恢复：$1"
+        "$CTL" on >/dev/null 2>&1 || log "ctl on 返回非 0（细节见 fibocom-l850-retry 日志）"
+    fi
 }
 
 # 单实例锁
@@ -61,9 +100,16 @@ log "启动（探针 ${PROBE_INTERVAL}s / 去抖 ${DEBOUNCE}s / ping 目标 $PRO
 
 # 事件源 ①：内核日志里的 xmm7360 故障
 journalctl -k -f -o cat 2>/dev/null |
-    grep --line-buffered -E "xmm7360.*(Failed to ship|rror|timeout|refused|removed|reset)" |
+    grep --line-buffered -E "xmm7360.*(Failed to ship|bad status|unknown modem status|crashed|rror|timeout|refused|removed|reset)" |
     while IFS= read -r line; do
-        act "kernel: ${line:0:120}"
+        # 这几条 = 驱动把设备标成错误态（xmm->error = -ENODEV，粘滞到重新 probe）：
+        # 只有重载模块能救，软重试（同模块再跑 bring-up）是白费
+        case "$line" in
+            *"Failed to ship"*|*"bad status"*|*"unknown modem status"*|*"crashed"*)
+                act "kernel: ${line:0:120}" hard ;;
+            *)
+                act "kernel: ${line:0:120}" soft ;;
+        esac
     done &
 
 # 事件源 ②：netlink 链路/IPv4 地址/路由变化

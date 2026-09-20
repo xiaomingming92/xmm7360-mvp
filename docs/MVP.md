@@ -63,7 +63,9 @@
 | 探针更灵敏 | `sudo systemctl edit fibocom-l850-watch.service` → `Environment=PROBE_INTERVAL=60` |
 | 事件更"广" | 改 `fibocom-l850-watch` 里的 grep 正则 |
 | 看恢复过程 | `journalctl -t fibocom-l850-watch -f` / `journalctl -t fibocom-l850-retry -f` |
+| 看触发时的现场快照 | `journalctl -t fibocom-l850-snap -n 40`（每次触发恢复前自动记一段） |
 | 手动来一轮 | `sudo /usr/local/bin/fibocom-l850-ctl on`（或面板开关 / 菜单头右侧的圆钮「重新连接」） |
+| 强制跳过软重试 | `sudo /usr/local/bin/fibocom-l850-ctl on --hard`（怀疑驱动错误态时；watcher 命中内核错误事件会自动这么调） |
 | 只想要轮询 | `sudo systemctl disable --now fibocom-l850-watch.service`（其余链路不受影响） |
 
 ## 六、历史对照：谁负责哪一层的坑
@@ -88,3 +90,44 @@
 | `addHeaderSuffix` 只能调一次 | 二次调用会先 `remove_child(_headerSpacer)`，spacer 已不在 → 报错 | 表头后缀只挂一个 actor |
 | Wayland 下改完没变化 | 注销重登前后一样 | gnome-shell 的 ESM 模块缓存只在新会话建立；改 `extension.js` 必须**注销重登**（disable/enable 不够） |
 | 装了两份容易改错 | 改了 repo 里的文件但面板没变 | 源在 `files/gnome-extension/<uuid>/extension.js`，活文件在 `~/.local/share/gnome-shell/extensions/<uuid>/`；用 `install-gui-polish.sh` 同步，别手改活文件 |
+
+## 八、分级恢复 + 取证快照（2026-09-20 晚补强）
+
+### 起因：一次"符合设计"但完全不可接受的恢复
+
+| 时刻 | 事件 | 判断 |
+|---|---|---|
+| 18:06:51 | 开机首轮 bring-up 45s 超时失败 | 设计内，但 45 秒白扔 |
+| 18:07:42 → 18:07:46 | 第 2 次 **4 秒**成功 | ✅ |
+| 20:26:22 | 内核 `bad status feedb007` + `Failed to ship coalesced frame`（各 1 条） | 事件被 watcher 同秒捕获 ✅ |
+| 20:27:08–20:28:13 | 4 次软重试**全部**撞 `[Errno 16] Device or resource busy: '/dev/xmm0/rpc'` | ❌ 白费 ~2 分钟 |
+| 20:30–20:57:40 | 14 次触发 / 29 次 bring-up / 6 次"成功"才收敛；其间**内核一条 xmm 日志都没有** | ❌ 抖了 31 分钟 |
+
+### 两条根因（都在驱动里，改不动的地方）
+
+1. **驱动错误态是粘滞的**：`xmm7360_poll()` 见 `bar2[BAR2_STATUS] != 0x600df00d`
+   就 `xmm->error = -ENODEV`；全驱动的 RPC 读写都直接返回这个 errno，
+   而 `error` 只有 `xmm7360_dev_init()`（= 重新 probe）才清零，
+   驱动里那个 `init_work` 从来没被 `schedule_work` 过 → **不会自愈**。
+2. **背压之后没人唤醒**：我们的丢帧补丁 `netif_stop_queue()` 之后，唤醒只在
+   `xmm7360_net_poll()`（RX 路径）；设备已 error → 没有 RX → 队列永远停着。
+   表现就是"IPv4 在、ping 死、内核不吭声"。`xmm7360_net_xmit()` 在 TD ring 满时同理，
+   而且驱动没有 `ndo_tx_timeout`（没有 TX 看门狗）。
+
+### 补强内容
+
+| 补强 | 做法 |
+|---|---|
+| 分级恢复 | watcher 命中 `Failed to ship` / `bad status` / `unknown modem status` / `crashed` → `ctl on --hard`：写 `/run/fibocom-l850-force-hard`（时间戳，120 秒内有效）→ ensure **跳过**注定失败的软重试，直接硬恢复 + 一次 bring-up；ensure 跑到一半收到标记也会立刻转硬恢复 |
+| 不打断正在跑的 ensure | `ctl on --hard` 先把标记落盘再判断"ensure 正在跑"，所以正在跑的 ensure 也能读到（软重试不会再白跑） |
+| 标记不误伤 | 链路本来就健康（ping 通）时 `ctl on` 直接删标记；ensure 消费即删，且只认 120 秒内的 |
+| RPC 占用取证 | 每次 bring-up 的输出留档到 `/run/fibocom-l850-up.log`；撞 `Device or resource busy` 时把 `/dev/xmm0/rpc` 的持有者打进 journal |
+| 每次尝试留现场 | 失败行现在带 `addr=… 默认路由=… 会话进程=…`，一眼区分"陈旧地址"与"真会话" |
+| 触发前快照 | `snapshot()` 写 `fibocom-l850-snap`：内核尾、`Failed to ship` 计数、rpc 持有者、地址/路由/会话进程/链路。**故意不查 Status**（Status 会打开 rpc，可能把紧接着的 bring-up 顶成 EBUSY） |
+| 开机首轮 | 开机后 300 秒内的第一次超时 45 → 90 秒（冷启动实测第 1 次必然超时、第 2 次 4 秒就成）；事件驱动的恢复仍保持 45 秒快速失败 |
+
+### 还没做（要等取证）
+
+- **驱动自愈**：`bad status` 时不只标记 error，而是限次重初始化（`init_work` 那段惰性代码可以派上用场）；
+- **TX 看门狗**：`ndo_tx_timeout` + `watchdog_timeo`，队列停住且 `qp_can_write()` 为真时唤醒；
+- 这两条都要重编模块 + 重载（会让 4G 断一次），所以等下一次复现、快照把机制钉死后再动。

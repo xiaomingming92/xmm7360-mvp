@@ -8,6 +8,11 @@
 #   2) "on" 不再自己重载模块，而是把重试交给 fibocom-l850-up.service
 #      （它现在的 ExecStart 是 fibocom-l850-up-retry，内置上游 issue #186 的
 #      "不重载模块先重跑几次"策略），并立刻返回，让面板按 10 秒轮询看结果。
+#   3) "on --hard"：把"这次是驱动级错误态、必须硬恢复"的意图钉给 ensure。
+#      为什么需要：xmm7360_poll() 读到 `bad status` 会把 xmm->error 置 -ENODEV，
+#      而这个 errno 全驱动粘滞，只有 dev_init（= 重新 probe / 重载模块）才清零。
+#      此时同模块再跑 4 次 bring-up 注定白费（当晚实测还全撞 EBUSY），
+#      真正有效的只有硬恢复。watcher 命中内核错误事件时就会带 --hard 调进来。
 #
 # Part of fibocom-l850-gnome-lte. SPDX-License-Identifier: GPL-3.0-or-later
 set -u
@@ -15,6 +20,9 @@ set -u
 IFACE=wwan0
 CONF=/etc/fibocom-l850-lte/modem.conf
 METRIC=1000
+# 硬恢复标记：内容是写入时的 unix 时间戳；消费方 fibocom-l850-up-retry。
+# 放在 /run（重启即清），并且消费方只认 120 秒内的标记，避免过期意图误伤下一次恢复。
+HARD_STAMP=${HARD_STAMP:-/run/fibocom-l850-force-hard}
 [ -r "$CONF" ] && . "$CONF"
 
 # 可用 = 链路起来了 **且** 有 IPv4 **且真能通**（ping 一次）
@@ -57,6 +65,12 @@ try_up() {
 
 case "${1:-}" in
   on)
+    # --hard：先落标记（放在"ensure 正在跑就别打断"判断之前）——
+    # 这样即便 ensure 正在跑，它也会在下一次尝试前读到标记并立刻转硬恢复。
+    if [ "${2:-}" = "--hard" ] || [ "${2:-}" = "hard" ]; then
+        date +%s > "$HARD_STAMP" 2>/dev/null || true
+        echo "已置硬恢复标记（$HARD_STAMP）" >&2
+    fi
     # 如果 ensure 正在跑，别打断它！否则每次事件都 restart 一次 bring-up，
     # 它会永远跑不完（2026-09-20 实测：IPv6 RA 抖动让守护每 15 秒触发一次）。
     state=$(systemctl is-active fibocom-l850-up.service 2>/dev/null || true)
@@ -65,6 +79,9 @@ case "${1:-}" in
         exit 0
     fi
     if try_up; then
+        # 链路本来就是好的（ping 通）→ 说明没有驱动错误态，标记作废，
+        # 免得 120 秒内下一次无关的恢复被它带成硬恢复
+        rm -f "$HARD_STAMP" 2>/dev/null || true
         ensure_route
     else
         echo "wwan0 还没有 IPv4 → 交给 ensure 服务在后台重试（#186 策略）" >&2
@@ -84,7 +101,7 @@ case "${1:-}" in
     fi
     ;;
   *)
-    echo "usage: $0 {on|off|status}" >&2
+    echo "usage: $0 {on [--hard]|off|status}" >&2
     exit 2
     ;;
 esac

@@ -13,10 +13,44 @@
 #   判成功 = wwan0 拿到 IPv4（不看脚本退出码；上游正常路径本来就 exit 1）；
 #   先在同一模块加载下重试 TRIES_PER_ROUND 次；
 #   仍失败才重载 xmm7360 模块，再来 ROUNDS-1 轮。
+#
+# 2026-09-20 晚补强（依据当晚 20:26–20:57 那场 31 分钟抖动：14 次触发 / 29 次 bring-up /
+# 6 次"成功"才收敛，其中 4 次软重试全撞 `[Errno 16] Device or resource busy`）：
+#   ① 分级：收到 watcher 的硬恢复请求（/run/fibocom-l850-force-hard）时**跳过**注定白费的
+#      软重试，直接硬恢复后再跑一次 bring-up —— 因为驱动进了错误态
+#      （xmm7360_poll() 见 `bad status` → xmm->error=-ENODEV，全驱动粘滞，
+#       只有重载模块/重新 probe 才清），同模块重跑多少次都不可能成功；
+#   ② 取证：每次 bring-up 的输出留档到 $BUPLOG，撞 EBUSY 时把 /dev/xmm0/rpc 的持有者
+#      打出来；每次尝试结束再记一行"地址/默认路由/会话进程"；
+#   ③ 开机首轮的 45s 超时改 90s（冷启动实测第 1 次 45s 超时、第 2 次 4 秒就成），
+#      事件驱动的恢复仍保持 45s 快速失败。
 set -u
 
 log() { logger -t fibocom-l850-retry -- "$*"; echo "$*"; }
 have_ipv4() { ip -4 addr show wwan0 2>/dev/null | grep -q 'inet '; }
+
+HARD_STAMP=${HARD_STAMP:-/run/fibocom-l850-force-hard}
+BUPLOG=${BUPLOG:-/run/fibocom-l850-up.log}
+
+# watcher/ctl 传来的"这次必须硬恢复"意图：一次性消费（读到就删），且只认 120 秒内的标记
+hard_requested() {
+    [ -r "$HARD_STAMP" ] || return 1
+    local stamp now
+    stamp=$(cat "$HARD_STAMP" 2>/dev/null || echo 0)
+    rm -f "$HARD_STAMP" 2>/dev/null || true
+    now=$(date +%s)
+    case "$stamp" in ''|*[!0-9]*) return 1 ;; esac
+    [ $(( now - stamp )) -le 120 ]
+}
+
+# 一行"本次尝试结束时的现场"：光看 rc 分不清"陈旧地址"和"真会话"
+state_line() {
+    local addr route nproc
+    addr=$(ip -4 addr show wwan0 2>/dev/null | awk '/inet /{printf "%s ", $2}')
+    route=$(ip route show default dev wwan0 2>/dev/null | wc -l)
+    nproc=$(pgrep -c -f open_xdatachannel.py 2>/dev/null || echo 0)
+    printf 'addr=%s 默认路由=%s 会话进程=%s' "${addr:-无}" "$route" "$nproc"
+}
 
 # 健康 = 链路 up + 有 IPv4 + ping 得通（目标取 modem.conf 里第一个 DNS，默认 223.5.5.5）。
 # 只判 IPv4 是不行的：数据会话死掉后地址会残留成"陈旧地址"，
@@ -59,42 +93,26 @@ SETTLE=${SETTLE:-5}                   # 首次动作前的静置（timer 已保�
 # 如果第一次就等 180 秒，用户看到的就是"开机后很久才自动激活"。
 # 前面几轮快速失败、快速重试，等到模组就绪时立刻成功；后面给足时间，
 # 避免"其实在正常注册/附着"时被误杀。
+# 例外：开机后 BOOT_GRACE 秒内（默认 300s）的第一次给 90s —— 冷启动实测第一次
+# 45s 必然超时、第二次 4 秒就成功，等于白白多花 45 秒还多记一条失败。
+BOOT_GRACE=${BOOT_GRACE:-300}
 timeout_for_attempt() {
+    local up_s
     case "$1" in
-        1) echo 45 ;;
+        1)
+            up_s=$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 99999)
+            if [ "${up_s:-99999}" -lt "$BOOT_GRACE" ]; then echo 90; else echo 45; fi
+            ;;
         2) echo 60 ;;
         3) echo 120 ;;
         *) echo "$RUN_TIMEOUT" ;;
     esac
 }
 
-if healthy; then
-  log "wwan0 已健康（链路 + IPv4 + ping $PROBE_IP 通），无需动作"
-  exit 0
-fi
-
-sleep "$SETTLE"
-
-for round in $(seq 1 "$ROUNDS"); do
-  for attempt in $(seq 1 "$TRIES_PER_ROUND"); do
-    idx=$(( (round - 1) * TRIES_PER_ROUND + attempt ))
-    tmo=$(timeout_for_attempt "$idx")
-    log "第 $round/$ROUNDS 轮 · 第 $attempt/$TRIES_PER_ROUND 次：跑 bring-up（超时 ${tmo}s，不重载模块）"
-    kill_strays
-    timeout -k 5 "$tmo" /usr/local/bin/fibocom-l850-up
-    rc=$?
-    if attempt_succeeded; then
-      log "成功：wwan0 已有 IPv4 且 ping $PROBE_IP 通（rc=$rc）"
-      exit 0
-    fi
-    log "本次未拿到 IPv4（rc=$rc），继续重试"
-    sleep 3
-  done
-
-  if [ "$round" -lt "$ROUNDS" ]; then
-    log "本轮 $TRIES_PER_ROUND 次都没成功 → 重载 xmm7360 模块后再来一轮"
-    # 顺手把网络模式纠成"自动（含 4G）"：刷固件会把 WS46 重置成 28（只有 2G+3G），
-    # 而联通 2G/3G 多地已关 → 表现就是"有 SIM、无信号、注册不上"（今天踩过）。
+# 硬恢复：整条阶梯里唯一能清掉驱动错误态的动作
+# （xmm7360_poll() 的 `bad status` → xmm->error = -ENODEV，只有 dev_init 清零）
+hard_recover() {
+    log "硬恢复：重载 xmm7360 模块（驱动错误态只有重新 probe 才清）"
     if [ -x /usr/local/bin/fibocom-l850-rat ]; then
         log "顺带纠正网络模式为自动（AT+WS46=31）"
         /usr/local/bin/fibocom-l850-rat auto >/dev/null 2>&1 || true
@@ -105,6 +123,66 @@ for round in $(seq 1 "$ROUNDS"); do
     sleep 3
     modprobe xmm7360 2>/dev/null || true
     sleep 10
+}
+
+# 跑一次 bring-up，输出留档（journal 里仍然有，因为 tee 的 stdout 照常进 journal）
+run_bringup() {
+    local tmo=$1 rc
+    timeout -k 5 "$tmo" /usr/local/bin/fibocom-l850-up 2>&1 | tee "$BUPLOG"
+    rc=${PIPESTATUS[0]}
+    if grep -q "Device or resource busy" "$BUPLOG" 2>/dev/null; then
+        log "本次 bring-up 撞到 RPC 被占用（EBUSY）：持有者=$(fuser -v /dev/xmm0/rpc 2>&1 | tail -n +2 | tr '\n' ' ' | sed 's/  */ /g')"
+    fi
+    return "$rc"
+}
+
+if healthy; then
+  log "wwan0 已健康（链路 + IPv4 + ping $PROBE_IP 通），无需动作"
+  exit 0
+fi
+
+# 进门就已经带着硬恢复请求（watcher 命中内核错误事件：Failed to ship / bad status / …）
+if hard_requested; then
+    log "收到硬恢复请求（驱动级错误态）：跳过软重试"
+    hard_recover
+    log "硬恢复后：第 1 次跑 bring-up（超时 ${RUN_TIMEOUT}s）"
+    kill_strays
+    run_bringup "$RUN_TIMEOUT" || true
+    if attempt_succeeded; then
+        log "成功：wwan0 已有 IPv4 且 ping $PROBE_IP 通（硬恢复后首跑）"
+        exit 0
+    fi
+    log "硬恢复后首跑仍未成功（$(state_line)）→ 转常规阶梯"
+fi
+
+sleep "$SETTLE"
+
+for round in $(seq 1 "$ROUNDS"); do
+  for attempt in $(seq 1 "$TRIES_PER_ROUND"); do
+    idx=$(( (round - 1) * TRIES_PER_ROUND + attempt ))
+    tmo=$(timeout_for_attempt "$idx")
+    # 跑着跑着又来了硬恢复请求（新一次驱动错误）：别再浪费软重试
+    if hard_requested; then
+        log "中途收到硬恢复请求 → 立刻转硬恢复（跳过剩余软重试）"
+        hard_recover
+    fi
+    log "第 $round/$ROUNDS 轮 · 第 $attempt/$TRIES_PER_ROUND 次：跑 bring-up（超时 ${tmo}s，不重载模块）"
+    kill_strays
+    run_bringup "$tmo"
+    rc=$?
+    if attempt_succeeded; then
+      log "成功：wwan0 已有 IPv4 且 ping $PROBE_IP 通（rc=$rc）"
+      exit 0
+    fi
+    log "本次未拿到 IPv4（rc=$rc，$(state_line)），继续重试"
+    sleep 3
+  done
+
+  if [ "$round" -lt "$ROUNDS" ]; then
+    log "本轮 $TRIES_PER_ROUND 次都没成功 → 重载 xmm7360 模块后再来一轮"
+    # hard_recover 里已经带上"顺手把网络模式纠成 auto"（刷固件会把 WS46 重置成 28
+    # = 只有 2G+3G，而联通 2G/3G 多地已关 → 表现就是"有 SIM、无信号、注册不上"）
+    hard_recover
   fi
 done
 
