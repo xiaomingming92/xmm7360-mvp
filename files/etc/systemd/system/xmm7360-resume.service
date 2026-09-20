@@ -1,0 +1,12 @@
+[Unit]
+Description=XMM7360 数据通道重建（挂起/休眠恢复后）
+After=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/xmm-resume
+TimeoutStartSec=180
+
+[Install]
+WantedBy=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+

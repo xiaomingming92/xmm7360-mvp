@@ -1,0 +1,44 @@
+#!/bin/bash
+# 打开 XMM7360 数据通道，并通过 D-Bus 让 NetworkManager 接管这条连接。
+# 用法：sudo xmm-up
+set -uo pipefail
+
+# 显式 PATH（sudo 环境可能很干净），并避免用 lsmod|grep 那种会被 pipefail+SIGPIPE 误判的写法
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+SRC="${XMM7360_SRC:-/home/xmm/ai/xmm7360-driver/src}"
+CONF="${XMM7360_CONF:-/etc/xmm7360.ini}"
+
+log() { logger -t xmm-up -- "$*"; echo "$*"; }
+mod_loaded() { grep -q '^xmm7360 ' /proc/modules; }
+
+# 模块没加载就自己加载（开机/挂起恢复后都可能还没加载）
+if ! mod_loaded; then
+  log "xmm7360 模块未加载 → 尝试 modprobe"
+  modprobe xmm7360 2>/dev/null || true
+  for i in 1 2 3 4 5; do
+    mod_loaded && break
+    sleep 1
+  done
+fi
+if ! mod_loaded; then
+  log "xmm7360 加载失败：dmesg | tail 看看（也可能需要先复位 PCI 设备）"
+  exit 1
+fi
+# 等设备节点和 wwan0 网卡就绪
+for i in $(seq 1 10); do
+  [ -e /dev/ttyXMM1 ] && ip link show wwan0 >/dev/null 2>&1 && break
+  sleep 1
+done
+
+log "运行 open_xdatachannel.py（$CONF，dbus=True 会注册 NM 连接 'xmm7360'）"
+if ! python3 "$SRC/rpc/open_xdatachannel.py" -c "$CONF"; then
+  log "open_xdatachannel.py 失败"; exit 1
+fi
+
+ip link set wwan0 up 2>/dev/null || true
+
+log "addr:  $(ip -4 -o addr show wwan0 2>/dev/null | tr -s ' ' | tr '\n' '|')"
+log "route: $(ip route show 2>/dev/null | tr '\n' '|')"
+log "nm:    $(nmcli -t -f NAME,TYPE,DEVICE,STATE con show --active 2>/dev/null | tr '\n' '|')"
+log "wwan0 就绪（NetworkManager 连接名 xmm7360）"

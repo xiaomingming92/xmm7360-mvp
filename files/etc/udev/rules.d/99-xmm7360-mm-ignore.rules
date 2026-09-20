@@ -1,0 +1,3 @@
+# xmm7360-pci 自己管 AT 口，别让 ModemManager 去 probe /dev/ttyXMM*；
+# wwan0 不在这里打标 —— 它由 NetworkManager 正常接管（连接名 xmm7360）。
+SUBSYSTEM=="tty", KERNEL=="ttyXMM*", ENV{ID_MM_DEVICE_IGNORE}="1"

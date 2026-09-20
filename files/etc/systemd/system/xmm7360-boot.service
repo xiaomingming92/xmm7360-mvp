@@ -1,0 +1,18 @@
+[Unit]
+Description=XMM7360 数据通道 + NetworkManager 连接（开机拉起）
+After=NetworkManager.service
+Wants=NetworkManager.service
+ConditionPathExists=/dev/ttyXMM1
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/xmm-up
+RemainAfterExit=yes
+TimeoutStartSec=300
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

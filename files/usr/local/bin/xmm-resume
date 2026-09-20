@@ -1,0 +1,22 @@
+#!/bin/bash
+# 挂起/休眠恢复后重建 4G 数据通道。
+# xmm7360-pci 没有电源管理支持：模组挂起后掉线，必须重新配置。
+set -uo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+DEV=0000:05:00.0
+log() { logger -t xmm-resume -- "$*"; echo "$*"; }
+mod_loaded() { grep -q '^xmm7360 ' /proc/modules; }
+
+sleep 3
+
+if ! mod_loaded; then
+  log "xmm7360 模块不在 → ACPI 复位 + 重新加载"
+  echo 1 > "/sys/bus/pci/devices/$DEV/reset" 2>/dev/null || true
+  sleep 2
+  modprobe xmm7360 || { log "modprobe xmm7360 失败"; exit 1; }
+  sleep 3
+fi
+
+exec /usr/local/bin/xmm-up
