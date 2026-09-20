@@ -1,0 +1,13 @@
+[Unit]
+Description=Fibocom L850 (XMM7360) 挂起/休眠恢复后重新拉起移动数据
+After=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+
+[Service]
+Type=oneshot
+# 睡眠 5 秒让设备枚举完，再调上游的 ctl（它自带"模块重载 + 重连"自愈）
+ExecStart=/bin/sh -c 'sleep 5; exec /usr/local/bin/fibocom-l850-ctl on'
+TimeoutStartSec=180
+
+[Install]
+WantedBy=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+
