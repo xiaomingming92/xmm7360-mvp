@@ -1,4 +1,7 @@
-# XMM7360 开源驱动（xmm7360-pci）替换方案
+# xmm7360-mvp — Fibocom L850-GL / Intel XMM7360 的 4G 自愈栈（ThinkPad A285）
+
+> 社区驱动 xmm7360-pci 的可复现部署 + **事件优先、探针兜底的恢复链**（见 [docs/MVP.md](docs/MVP.md)）
+> + GNOME 快速设置面板。本机环境：ThinkPad A285 / Ubuntu / 内核 7.0 / GNOME 50。
 
 ThinkPad A285 的 Fibocom L850-GL（Intel XMM7360，PCI `8086:7360`）在内核自带 `iosm`
 驱动下问题很多：S3 唤醒卡死（`PORT open refused, phase A-ROM/A-CD_READY`）、
@@ -26,10 +29,17 @@ xmm7360-driver/
 ## 装
 
 ```bash
-sudo /home/xmm/ai/xmm7360-driver/install.sh          # 默认 APN=3gnet（联通）
+git clone https://github.com/xiaomingming92/xmm7360-mvp.git
+cd xmm7360-mvp
+
+sudo ./install.sh                                    # 默认 APN=3gnet（联通）
 # 想换 APN / DNS：
-APN=3gnet DNS=221.6.4.66 sudo -E /home/xmm/ai/xmm7360-driver/install.sh
+APN=3gnet DNS=221.6.4.66 sudo -E ./install.sh
 ```
+
+所有安装脚本都用**自身所在目录**定位仓库，clone 到哪都行；但 **clone 目录别删** ——
+GNOME 层会把 `<repo>/src` 的绝对路径记进 `/etc/fibocom-l850-lte/modem.conf` 的
+`XMM7360_DIR=`，部署后的 bring-up 要靠它找 `rpc/open_xdatachannel.py`。
 
 安装脚本做的事：
 
@@ -117,7 +127,8 @@ sudo nmcli con up xmm7360
 安装（本目录只做三处必要改动，见脚本注释）：
 
 ```bash
-sudo /home/xmm/ai/xmm7360-driver/install-gnome-layer.sh
+git clone https://github.com/michaelruck/fibocom-l850-gnome-lte vendor/fibocom-gnome-lte
+sudo ./install-gnome-layer.sh
 ```
 
 它做的事：清掉临时层（NM 连接 / 临时的 boot+resume 单元 / 旧 udev 规则）→
@@ -134,7 +145,7 @@ sudo /home/xmm/ai/xmm7360-driver/install-gnome-layer.sh
 | 看 bring-up 日志 | `journalctl -u fibocom-l850-up.service -b -n 40` |
 | 换 APN | 改 `/etc/fibocom-l850-lte/modem.conf` 的 `APN=`，或扩展偏好里改；改完 `sudo systemctl restart fibocom-l850-up.service` |
 | 挂起/合盖恢复 | 自动（`fibocom-l850-resume.service` → `fibocom-l850-ctl on`） |
-| 彻底卸载/回滚 iosm | `sudo /home/xmm/ai/xmm7360-driver/uninstall.sh` |
+| 彻底卸载/回滚 iosm | `sudo ./uninstall.sh`（在仓库目录里） |
 
 ## 已知限制（来自驱动本身）
 
@@ -166,3 +177,15 @@ sudo /home/xmm/ai/xmm7360-driver/install-gnome-layer.sh
 - **内核升级**：靠 DKMS 自动重编；Secure Boot 开启时需要给模块签名（见上游 `INSTALLING.md`）。
 - 驱动源码较老（2024-02），上游已停更；本目录内 `src/` 是带本机兼容补丁的可用快照，
   以后内核再变 API 时盯着 `dkms status` / `make` 的编译报错即可。
+
+## 许可证
+
+本仓库是多许可的（各部分来自不同上游，按目录区分）：
+
+| 范围 | 许可 | 说明 |
+|---|---|---|
+| 根目录的安装脚本、自愈脚本（`files/usr/local/bin/fibocom-l850-*`）、文档 | MIT（见 [LICENSE](LICENSE)） | 本机新增的部分 |
+| `src/`（xmm7360-pci 驱动源码 + 本机兼容补丁） | GPL-2.0（沿用上游） | 上游：[xmm7360/xmm7360-pci](https://github.com/xmm7360/xmm7360-pci) |
+| `files/gnome-extension/`（GNOME 面板补丁） | GPL-3.0-or-later（沿用上游） | 上游：[michaelruck/fibocom-l850-gnome-lte](https://github.com/michaelruck/fibocom-l850-gnome-lte) |
+
+分发本仓库（或基于它做衍生）时请按各自目录的许可处理，尤其是 `src/` 里的内核模块。

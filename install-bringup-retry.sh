@@ -2,7 +2,7 @@
 # 给 Fibocom bring-up 加"重试 + 静置 + 模块重载"（解决 RPC 卡在 UtaMsSmsInit、
 # 面板 0 信号、wwan0 拿不到 IPv4 的问题）。
 set -euo pipefail
-ROOT=/home/xmm/ai/xmm7360-driver
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ $EUID -eq 0 ]] || { echo "需要 root：sudo $0" >&2; exit 1; }
 log() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 

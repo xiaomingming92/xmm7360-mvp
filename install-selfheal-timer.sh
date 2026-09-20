@@ -2,7 +2,7 @@
 # 装上"每 10 分钟自检 + 不通就重跑 ensure"的定时器，并同步新版 ensure（更大重试预算）。
 # 用法：sudo ./install-selfheal-timer.sh
 set -euo pipefail
-ROOT=/home/xmm/ai/xmm7360-driver
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ $EUID -eq 0 ]] || { echo "需要 root：sudo $0" >&2; exit 1; }
 log() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 

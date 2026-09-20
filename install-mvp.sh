@@ -3,7 +3,7 @@
 # 同时把原来的 5 分钟自检降频到 30 分钟（避免和守护重复动作）。
 # 用法：sudo ./install-mvp.sh
 set -euo pipefail
-ROOT=/home/xmm/ai/xmm7360-driver
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ $EUID -eq 0 ]] || { echo "需要 root：sudo $0" >&2; exit 1; }
 log() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 

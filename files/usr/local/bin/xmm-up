@@ -6,8 +6,11 @@ set -uo pipefail
 # 显式 PATH（sudo 环境可能很干净），并避免用 lsmod|grep 那种会被 pipefail+SIGPIPE 误判的写法
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-SRC="${XMM7360_SRC:-/home/xmm/ai/xmm7360-driver/src}"
 CONF="${XMM7360_CONF:-/etc/xmm7360.ini}"
+# 源码目录：install.sh 会把仓库 src 的绝对路径写进 $CONF 的 SRC=，
+# 所以部署后的命令不依赖 clone 路径；也可用 XMM7360_SRC 直接覆盖。
+SRC="${XMM7360_SRC:-$(sed -n 's/^SRC=//p' "$CONF" 2>/dev/null | head -1)}"
+[ -n "${SRC:-}" ] || SRC=/usr/local/src/xmm7360-mvp/src
 
 log() { logger -t xmm-up -- "$*"; echo "$*"; }
 mod_loaded() { grep -q '^xmm7360 ' /proc/modules; }

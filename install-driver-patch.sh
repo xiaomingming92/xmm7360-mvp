@@ -3,7 +3,7 @@
 # 用法：sudo ./install-driver-patch.sh
 set -euo pipefail
 
-ROOT=/home/xmm/ai/xmm7360-driver
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VER=2024.02.24-codex1
 DEST=/usr/src/xmm7360-pci-$VER
 

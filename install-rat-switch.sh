@@ -9,7 +9,7 @@
 # 用法：sudo ./install-rat-switch.sh
 set -euo pipefail
 
-ROOT=/home/xmm/ai/xmm7360-driver
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 UUID=fibocom-l850-lte@michaelruck.github.io
 LOGIN_USER="${SUDO_USER:-xmm}"
 USER_HOME="$(getent passwd "$LOGIN_USER" | cut -d: -f6)"

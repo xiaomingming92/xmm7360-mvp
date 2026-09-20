@@ -4,7 +4,8 @@
 # 注意：必须以**普通用户**运行（gnome-extensions 需要会话 D-Bus）。
 set -euo pipefail
 
-SRC=/home/xmm/ai/xmm7360-driver/files/gnome-extension/fibocom-l850-lte@michaelruck.github.io/extension.js
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SRC="$ROOT/files/gnome-extension/fibocom-l850-lte@michaelruck.github.io/extension.js"
 DEST="$HOME/.local/share/gnome-shell/extensions/fibocom-l850-lte@michaelruck.github.io"
 UUID=fibocom-l850-lte@michaelruck.github.io
 

@@ -11,8 +11,12 @@
 # 另外顺手移除我们临时搭的那层（NM 连接 xmm7360 + xmm7360-boot/resume 单元），避免两边抢 wwan0。
 set -euo pipefail
 
-UPSTREAM=/home/xmm/fibocom-gnome-lte
-DRIVER_DIR=/home/xmm/ai/xmm7360-driver/src
+# 仓库自身位置（clone 到哪都行）；GNOME 层会把 $DRIVER_DIR 记进 modem.conf 的 XMM7360_DIR，
+# 所以 clone **别删**（部署后的 xmm-up / 上游脚本要靠它找 rpc/open_xdatachannel.py）。
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 上游 GUI 层：默认找 <repo>/vendor/fibocom-gnome-lte，也可以用 UPSTREAM=/path 指定
+UPSTREAM="${UPSTREAM:-$ROOT/vendor/fibocom-gnome-lte}"
+DRIVER_DIR="${DRIVER_DIR:-$ROOT/src}"
 UUID=fibocom-l850-lte@michaelruck.github.io
 LOGIN_USER="${SUDO_USER:-xmm}"
 APN="${APN:-3gnet}"
@@ -20,7 +24,12 @@ DNS="${DNS:-221.6.4.66 223.5.5.5}"
 METRIC="${METRIC:-1000}"
 
 [[ $EUID -eq 0 ]] || { echo "需要 root：sudo $0" >&2; exit 1; }
-[[ -x "$UPSTREAM/install.sh" ]] || { echo "缺少 $UPSTREAM/install.sh（上游项目）" >&2; exit 1; }
+[[ -x "$UPSTREAM/install.sh" ]] || {
+  echo "缺少 $UPSTREAM/install.sh（上游 GUI 层）" >&2
+  echo "先 clone：git clone https://github.com/michaelruck/fibocom-l850-gnome-lte \"$UPSTREAM\"" >&2
+  echo "或用 UPSTREAM=/已有路径 sudo -E $0" >&2
+  exit 1
+}
 [[ -f "$DRIVER_DIR/rpc/open_xdatachannel.py" ]] || { echo "缺少驱动源码 $DRIVER_DIR" >&2; exit 1; }
 
 log() { printf '\033[1m==>\033[0m %s\n' "$*"; }
@@ -51,7 +60,7 @@ sed -i -E "s|^XMM7360_DIR=.*|XMM7360_DIR=${DRIVER_DIR}|" "$CONF"
 grep -E '^(APN|DNS|METRIC|XMM7360_DIR)=' "$CONF"
 
 log "5/5 挂起恢复单元 + 启用扩展"
-install -D -m 644 /home/xmm/ai/xmm7360-driver/files/etc/systemd/system/fibocom-l850-resume.service \
+install -D -m 644 "$ROOT/files/etc/systemd/system/fibocom-l850-resume.service" \
         /etc/systemd/system/fibocom-l850-resume.service
 systemctl daemon-reload
 systemctl enable fibocom-l850-resume.service >/dev/null

@@ -97,6 +97,9 @@ systemctl reload NetworkManager 2>/dev/null || true
 log "安装配置与辅助脚本（APN=$APN）"
 install -D -m 644 "$ROOT/files/etc/xmm7360.ini" /etc/xmm7360.ini
 sed -i "s|^apn=.*|apn=$APN|" /etc/xmm7360.ini
+# 记下源码位置：部署后的 /usr/local/bin/xmm-up 靠它找 rpc/open_xdatachannel.py
+grep -q '^SRC=' /etc/xmm7360.ini || printf '\nSRC=%s\n' "$SRC" >> /etc/xmm7360.ini
+sed -i "s|^SRC=.*|SRC=$SRC|" /etc/xmm7360.ini
 install -D -m 755 "$ROOT/files/usr/local/bin/xmm-up"     /usr/local/bin/xmm-up
 install -D -m 755 "$ROOT/files/usr/local/bin/xmm-resume" /usr/local/bin/xmm-resume
 install -D -m 644 "$ROOT/files/etc/systemd/system/xmm7360-resume.service" /etc/systemd/system/

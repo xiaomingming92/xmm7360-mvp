@@ -6,7 +6,8 @@
 # 逻辑、脚本、面板开关都不变，只是"什么时候、以什么方式"被拉起。
 set -euo pipefail
 
-ROOT=/home/xmm/ai/xmm7360-driver
+# 仓库自身位置（clone 到哪都行）
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ $EUID -eq 0 ]] || { echo "需要 root：sudo $0" >&2; exit 1; }
 
 log() { printf '\033[1m==>\033[0m %s\n' "$*"; }
