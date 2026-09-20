@@ -1,0 +1,12 @@
+[Unit]
+Description=开机 15 秒后触发 Fibocom L850 bring-up（脱离启动关键路径）
+Documentation=https://github.com/michaelruck/fibocom-l850-gnome-lte
+
+[Timer]
+OnBootSec=15s
+AccuracySec=5s
+Unit=fibocom-l850-up.service
+
+[Install]
+WantedBy=timers.target
+
