@@ -49,6 +49,7 @@ const T = ZH ? {
     signal: '信号',
     operator: '运营商',
     network: '网络',
+    details: '详情',
     networkMode: '网络模式',
     modeAuto: '自动（2G/3G/4G）',
     mode4g: '仅 4G（LTE）',
@@ -67,6 +68,7 @@ const T = ZH ? {
     signal: 'Signal',
     operator: 'Operator',
     network: 'Network',
+    details: 'Details',
     networkMode: 'Network mode',
     modeAuto: 'Automatic (2G/3G/4G)',
     mode4g: '4G only (LTE)',
@@ -126,7 +128,12 @@ class LteToggle extends QuickMenuToggle {
         // 菜单：和 GNOME 自带磁贴一样，右侧 > 打开菜单
         this.menu.setHeader('network-cellular-symbolic', T.title);
 
-        // 详情行（只读）：信号 / 运营商 / 网络（制式·频段·EARFCN）/ APN
+        // 详情行（只读）：信号 / 运营商 / 网络（制式·频段·EARFCN）/ APN。
+        // 放进 **子菜单**：GNOME 只有 PopupSubMenu 自带 St.ScrollView
+        // （popupMenu.js 的注释："we make it scrollable … only take effect if a CSS
+        //  max-height is set on the top menu"），而顶层 PopupMenu 没有滚动容器。
+        // 子菜单的滚动条由 _needsScrollbar() 决定，它读的正是 topMenu.actor 的
+        // max-height —— 我们已经在 open-state-changed 里按显示器工作区设置。
         this._signalItem = new PopupMenu.PopupMenuItem(`${T.signal}：—`);
         this._operatorItem = new PopupMenu.PopupMenuItem(`${T.operator}：—`);
         this._networkItem = new PopupMenu.PopupMenuItem(`${T.network}：—`);
@@ -134,10 +141,12 @@ class LteToggle extends QuickMenuToggle {
         for (const item of [this._signalItem, this._operatorItem,
                             this._networkItem, this._apnItem])
             item.setSensitive(false);
-        this.menu.addMenuItem(this._signalItem);
-        this.menu.addMenuItem(this._operatorItem);
-        this.menu.addMenuItem(this._networkItem);
-        this.menu.addMenuItem(this._apnItem);
+        this._detailsMenu = new PopupMenu.PopupSubMenuMenuItem(T.details);
+        this._detailsMenu.menu.addMenuItem(this._signalItem);
+        this._detailsMenu.menu.addMenuItem(this._operatorItem);
+        this._detailsMenu.menu.addMenuItem(this._networkItem);
+        this._detailsMenu.menu.addMenuItem(this._apnItem);
+        this.menu.addMenuItem(this._detailsMenu);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
