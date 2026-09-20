@@ -57,6 +57,24 @@ journalctl -t xmm-up -n 20
 
 ## 本机验证记录（2026-09-20 09:07，联通 LTE）
 
+### 2026-09-20 11:10 实测（xmm7360-pci 路径 + 社区 GUI 层）✅
+
+bring-up 卡在 `RPC executing UtaMsSmsInit` 时，按上游
+[issue #186](https://github.com/xmm7360/xmm7360-pci/issues/186) 的做法
+**不重载模块、把 bring-up 连跑几次**后成功：
+
+```
+wwan0            inet 10.100.37.123/32
+ip route         default dev wwan0 proto static metric 1000
+Status (D-Bus)   {"state":"connected","rsrp_dbm":-98,"earfcn":1650,"rat":"LTE",
+                  "mcc":460,"mnc":1,"operator":"460/01","bars":2}
+curl --interface wwan0 http://www.baidu.com → 200
+```
+
+这条规律已写进 ensure 脚本 `files/usr/local/bin/fibocom-l850-up-retry`：
+判成功 = wwan0 有 IPv4；先在同一模块加载下重试 3 次（#186），仍失败才重载模块再来一轮。
+成功时 bring-up 进程会自行退出、释放 `/dev/xmm0/rpc`，面板才读得到信号（否则报 busy → 0 格）。
+
 ```
 $ nmcli con show --active | grep xmm7360
 xmm7360  45606672-ee8c-458e-b5c2-bec64ad447f3  generic  wwan0
